@@ -90,6 +90,10 @@ export const CATEGORIES = [
   'care',
   'social',
   'wealth',
+  // Not a discipline you pick from the Archive — the home for tasks the nightly
+  // briefing invents. Kept in the union so planned quests flow through the same
+  // completion, coverage and calendar code as everything else.
+  'planned',
 ] as const;
 export type CategoryId = (typeof CATEGORIES)[number];
 
@@ -105,7 +109,13 @@ export const categoryMeta: Record<
   care: { label: 'Grooming & Recovery', short: 'CARE', color: '#4DD0C4', glyph: '❖' },
   social: { label: 'Social Bonds', short: 'BONDS', color: '#FFC24D', glyph: '◇' },
   wealth: { label: 'Resource Management', short: 'GOLD', color: '#D9A441', glyph: '◆' },
+  // Deliberately a neutral platinum: tonight's plan should read as issued by
+  // the System rather than belonging to any one discipline.
+  planned: { label: "Tomorrow's Plan", short: 'PLAN', color: '#C5CBD6', glyph: '✧' },
 };
+
+/** The eight disciplines you can actually browse and accept quests from. */
+export const BROWSABLE_CATEGORIES = CATEGORIES.filter((c) => c !== 'planned');
 
 /* ------------------------------------------------------------------ scale */
 

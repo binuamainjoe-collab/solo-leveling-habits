@@ -25,7 +25,9 @@ export type Track =
   | { type: 'level'; level: number }
   | { type: 'rank'; rank: Rank }
   | { type: 'categoryDays'; category: CategoryId; days: number }
-  | { type: 'questsCompleted'; count: number };
+  | { type: 'questsCompleted'; count: number }
+  /** Nightly briefings accepted. */
+  | { type: 'plansMade'; count: number };
 
 export interface AchievementDef {
   id: string;
@@ -98,6 +100,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'skincare-100', title: 'ETERNAL YOUTH', flavor: 'One hundred rituals, morning and night. Your future face says thank you.', requirement: 'Complete skincare 100 times', tier: 'silver', glyph: '🧴', xp: 700, track: { type: 'total', questId: 'skincare-pm', amount: 100 } },
   { id: 'social-30', title: 'GUILD MASTER', flavor: 'Thirty days of tending your bonds. No one levels alone.', requirement: '30 days of social quests', tier: 'gold', glyph: '◇', xp: 1300, track: { type: 'categoryDays', category: 'social', days: 30 } },
   { id: 'wealth-30', title: 'TREASURY SEALED', flavor: 'Thirty days of managing what you have. Freedom is bought quietly.', requirement: '30 days of wealth quests', tier: 'gold', glyph: '◆', xp: 1300, track: { type: 'categoryDays', category: 'wealth', days: 30 } },
+
+  /* --------------------------------------------------------- planning */
+  { id: 'strategist', title: 'STRATEGIST', flavor: 'You decided what tomorrow was for before tomorrow could decide for you. Half of every battle is fought the night before.', requirement: 'Accept a nightly plan', tier: 'silver', glyph: '🗺️', xp: 400, track: { type: 'plansMade', count: 1 } },
+  { id: 'war-planner', title: 'THE WAR TABLE', flavor: 'Thirty nights spent planning the next day. The System no longer needs to tell you what to do.', requirement: 'Accept 30 nightly plans', tier: 'gold', glyph: '⚔️', xp: 1500, track: { type: 'plansMade', count: 30 } },
 
   /* ------------------------------------------------------------ secret */
   { id: 'secret-nightowl', title: 'HUNTER OF THE NIGHT', flavor: 'The System noticed you clearing quests at 3am. It is concerned, and impressed.', requirement: 'Complete a quest between 02:00 and 04:00', tier: 'mythic', glyph: '🦉', xp: 666, track: { type: 'questsCompleted', count: 1 }, secret: true },

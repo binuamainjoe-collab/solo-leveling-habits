@@ -1,7 +1,8 @@
+import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Card } from '@/components/system/Card';
 import { Screen } from '@/components/system/Screen';
@@ -19,6 +20,9 @@ import {
   statMeta,
 } from '@/constants/theme';
 import { ACHIEVEMENTS } from '@/data/achievements';
+import { plannerConfigured } from '@/data/planner';
+import { listAccounts, signOut, type Account } from '@/lib/auth';
+import { supabaseConfigured } from '@/lib/supabase';
 import { QUESTS } from '@/data/quests';
 import { playSound } from '@/lib/feedback';
 import { useProgress } from '@/store/progress';
@@ -167,6 +171,46 @@ export default function HunterScreen() {
             />
           </Card>
 
+          <SystemText variant="label" style={styles.sectionLabel}>
+            Account
+          </SystemText>
+          <Card style={styles.block}>
+            <AccountBlock />
+          </Card>
+
+          <SystemText variant="label" style={styles.sectionLabel}>
+            Nightly briefing
+          </SystemText>
+          <Card style={styles.block}>
+            <SystemText variant="body" style={styles.blockSub}>
+              After this hour the System offers to plan tomorrow with you. Say roughly what you
+              want to get done; it comes back with an unhurried order and room to breathe.
+              {state.plansAccepted > 0
+                ? ` ${state.plansAccepted} plan${state.plansAccepted === 1 ? '' : 's'} accepted so far.`
+                : ''}
+            </SystemText>
+            <TimeChips
+              value={state.settings?.briefingTime ?? '21:30'}
+              onChange={(v) => {
+                playSound('tap');
+                setSetting('briefingTime', v);
+              }}
+            />
+            {plannerConfigured() ? (
+              <GhostButton
+                label="▶ Plan tomorrow now"
+                onPress={() => {
+                  playSound('tap');
+                  router.push('/briefing');
+                }}
+              />
+            ) : (
+              <SystemText variant="meta" style={styles.notConnected}>
+                Not connected yet — the planner needs its endpoint before a briefing can run.
+              </SystemText>
+            )}
+          </Card>
+
           <Card tint={palette.negative} style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
               {state.activeQuestIds.length} of {QUESTS.length} quests on your board. Resetting
@@ -252,6 +296,147 @@ function Record({
   );
 }
 
+/**
+ * Who is signed in, and the way to change that.
+ *
+ * Reads the local registry rather than the live session so the row renders
+ * instantly from storage; the active session is what `switchAccount` and the
+ * sign-in screen manage.
+ */
+function AccountBlock() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+
+  useEffect(() => {
+    void listAccounts().then(setAccounts);
+  }, []);
+
+  const active = accounts[0];
+
+  if (!supabaseConfigured()) {
+    return (
+      <>
+        <SystemText variant="body" style={styles.blockSub}>
+          Progress is saved on this device only. Signing in with Google would carry it to the
+          browser too, but the System has no account server configured yet.
+        </SystemText>
+        <SystemText variant="meta" style={styles.notConnected}>
+          Not connected yet.
+        </SystemText>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {active ? (
+        <>
+          <SystemText variant="body" style={styles.blockSub}>
+            Signed in as {active.name} ({active.email}).
+            {accounts.length > 1 ? ` ${accounts.length} accounts linked on this device.` : ''}
+          </SystemText>
+          <GhostButton
+            label={accounts.length > 1 ? '⇄ Switch account' : '＋ Link another account'}
+            onPress={() => {
+              playSound('tap');
+              router.push('/signin');
+            }}
+          />
+          <View style={styles.accountSpacer} />
+          <GhostButton
+            label="Sign out"
+            onPress={() => {
+              playSound('tap');
+              void signOut();
+              router.push('/signin');
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <SystemText variant="body" style={styles.blockSub}>
+            Progress is saved on this device. Sign in with Google to carry it between your phone
+            and the browser, and to let the briefing plan around your calendar.
+          </SystemText>
+          <GhostButton
+            label="▶ Sign in with Google"
+            onPress={() => {
+              playSound('tap');
+              router.push('/signin');
+            }}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Fixed half-hours rather than a time picker: one press, no keyboard, nothing
+ * to spin through at bedtime.
+ */
+const BRIEFING_TIMES = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'] as const;
+
+function TimeChips({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  return (
+    <View style={styles.chipRow}>
+      {BRIEFING_TIMES.map((t) => {
+        const on = t === value;
+        return (
+          <Pressable
+            key={t}
+            onPress={() => onChange(t)}
+            accessibilityRole="radio"
+            accessibilityLabel={`Briefing at ${t}`}
+            accessibilityState={{ selected: on }}>
+            <Animated.View
+              style={[
+                styles.chip,
+                {
+                  borderColor: on ? palette.accent : palette.borderStrong,
+                  backgroundColor: on ? alpha(palette.accent, 0.18) : 'transparent',
+                  transitionProperty: 'backgroundColor',
+                  transitionDuration: 160,
+                },
+              ]}>
+              <SystemText
+                variant="label"
+                color={on ? palette.accent : palette.textMuted}
+                style={styles.chipText}>
+                {t}
+              </SystemText>
+            </Animated.View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** A flat outlined action, kept apart from DangerButton so red stays red. */
+function GhostButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      accessibilityRole="button"
+      accessibilityLabel={label}>
+      <Animated.View
+        style={[
+          styles.ghost,
+          {
+            transform: [{ scale: pressed ? 0.98 : 1 }],
+            transitionProperty: 'transform',
+            transitionDuration: 110,
+          },
+        ]}>
+        <SystemText variant="label">{label}</SystemText>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 function DangerButton({ onPress }: { onPress: () => void }) {
   const [pressed, setPressed] = useState(false);
   return (
@@ -312,6 +497,24 @@ const styles = StyleSheet.create({
   },
   catFill: { height: '100%', width: '100%' },
   catDays: { width: 34, textAlign: 'right', fontSize: 11 },
+
+  accountSpacer: { height: space.sm },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
+  chip: {
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  chipText: { fontSize: 10, letterSpacing: 1.2 },
+  notConnected: { fontSize: 11, lineHeight: 16 },
+  ghost: {
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    paddingVertical: space.md,
+  },
 
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingVertical: space.sm },
   toggleText: { flex: 1, minWidth: 0 },

@@ -24,6 +24,18 @@ export function setStorageAdapter(next: StorageAdapter): void {
   adapter = next;
 }
 
+/**
+ * Direct key access, for small records that don't need PersistentStore's
+ * coalescing — the account registry, for instance, which changes only when
+ * someone signs in or out. Routed through the same adapter so a test fake or a
+ * future cloud adapter covers these too.
+ */
+export const storage: StorageAdapter = {
+  get: (key) => adapter.get(key),
+  set: (key, value) => adapter.set(key, value),
+  remove: (key) => adapter.remove(key),
+};
+
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 /**

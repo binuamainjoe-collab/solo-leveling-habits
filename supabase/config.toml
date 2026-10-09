@@ -1,0 +1,20 @@
+# Supabase project config.
+#
+# `project_id` is just the local folder label; the deployed project is linked
+# separately with `supabase link`.
+project_id = "solo-leveling-habits"
+
+[functions.plan-tomorrow]
+# Predates Google sign-in and is still callable by a signed-out student, so
+# there is no JWT to check. The gate is the `x-app-secret` header plus the
+# server-side daily cap.
+verify_jwt = false
+
+# The two below are the opposite case: they exist to act on behalf of one
+# identified account, so the JWT is the whole point. The user id is always
+# taken from the verified token, never from the request body.
+[functions.google-link]
+verify_jwt = true
+
+[functions.google]
+verify_jwt = true

@@ -13,12 +13,25 @@ import { AppState } from 'react-native';
 import { ACHIEVEMENTS, type AchievementDef } from '@/data/achievements';
 import { CARDS_BY_ID, earnedCards, type CardContext, type CardDef } from '@/data/cards';
 import { buildPlan, type Profile } from '@/data/profile';
+import { isPlannedId, plannedToQuest, type PlannedTask } from '@/data/planner';
 import { isCeilingQuest, isComplete, windowState } from '@/data/completion';
 import { DEFAULT_ACTIVE, QUESTS_BY_ID, type QuestDef } from '@/data/quests';
 import { CATEGORIES, RANKS, type CategoryId, type Rank, type StatKey } from '@/constants/theme';
-import { PersistentStore, type SaveState } from '@/store/storage';
-
-const STORAGE_KEY = 'system.progress.v2';
+import { PersistentStore, storage, type SaveState } from '@/store/storage';
+import {
+  chooseSeed,
+  DEVICE_KEY,
+  fromStored,
+  keyFor,
+  mergeAll,
+  pullProgress,
+  pushProgress,
+  wrap,
+  ADOPTED_KEY,
+  type Envelope,
+  type PersistedState,
+} from '@/store/cloud';
+import { client } from '@/lib/supabase';
 
 /* ------------------------------------------------------------------ shape */
 
@@ -36,6 +49,15 @@ export interface Settings {
   sound: boolean;
   haptics: boolean;
   music: boolean;
+  /** 24h "HH:MM" after which the nightly briefing offers itself. */
+  briefingTime: string;
+}
+
+/** An accepted nightly plan, stored against the day it is FOR. */
+export interface StoredPlan {
+  taskIds: string[];
+  note: string;
+  acceptedAt: string;
 }
 
 export interface ProgressState {
@@ -56,6 +78,21 @@ export interface ProgressState {
   xp: number;
   stats: Record<StatKey, number>;
   unlocked: string[];
+  /**
+   * Every task the briefing has ever produced, keyed by id and never deleted —
+   * an archived day references its tasks by id, so dropping them would make
+   * that day's history unreadable.
+   */
+  planned: Record<string, PlannedTask>;
+  /** date -> the plan accepted for it. */
+  plans: Record<string, StoredPlan>;
+  /** Lifetime accepted plans, for the Strategist trophy. */
+  plansAccepted: number;
+  /**
+   * The date a briefing was waved away for. Persisted, not held in memory:
+   * "not tonight" has to survive reopening the app, or the gate just reappears.
+   */
+  briefingDismissed: string | null;
   /** Collectible cards owned, in the order they were earned. */
   cards: string[];
   /** Cards waiting to play their reveal. Never persisted. */
@@ -97,12 +134,16 @@ const baseStats = (): Record<StatKey, number> => ({
 function blankState(): ProgressState {
   return {
     profile: null,
-    settings: { sound: true, haptics: true, music: true },
+    settings: { sound: true, haptics: true, music: true, briefingTime: '21:30' },
     activeQuestIds: [...DEFAULT_ACTIVE],
     date: todayKey(),
     values: {},
     days: {},
     totals: {},
+    planned: {},
+    plans: {},
+    plansAccepted: 0,
+    briefingDismissed: null,
     questCompletions: 0,
     xp: 0,
     stats: baseStats(),
@@ -116,6 +157,11 @@ function blankState(): ProgressState {
     categoryDays: emptyCategoryDays(),
   };
 }
+
+/** Accepting tomorrow's plan before bed. */
+export const ACCEPT_PLAN_XP = 200;
+/** Clearing a quest you planned the night before. */
+export const PLANNED_XP_MULTIPLIER = 1.5;
 
 /* ---------------------------------------------------------------- levels */
 
@@ -150,9 +196,31 @@ export { isCeilingQuest, isComplete, windowState, type WindowState } from '@/dat
 
 /* ------------------------------------------------------------- deriving */
 
-/** Today, in the same shape as an archived day. */
-function summarize(activeIds: string[], values: Record<string, number>): DayRecord {
-  const quests = activeIds.map((id) => QUESTS_BY_ID[id]).filter(Boolean);
+/**
+ * Resolve any quest id, whichever source it came from.
+ *
+ * Every lookup goes through here. The catalogue used to be read directly, which
+ * meant a planned task — absent from it — was quietly dropped by `.filter`,
+ * counting toward nothing: not cleared, not the streak, not a perfect day.
+ */
+function questFor(s: ProgressState, id: string): QuestDef | undefined {
+  if (isPlannedId(id)) {
+    const task = s.planned[id];
+    return task ? plannedToQuest(task) : undefined;
+  }
+  return QUESTS_BY_ID[id];
+}
+
+/** The board for a given day: the standing quests plus that day's plan. */
+function boardIdsFor(s: ProgressState, date: string): string[] {
+  return [...s.activeQuestIds, ...(s.plans[date]?.taskIds ?? [])];
+}
+
+/** One day, in the shape the log stores. */
+function summarize(s: ProgressState, date: string, values: Record<string, number>): DayRecord {
+  const quests = boardIdsFor(s, date)
+    .map((id) => questFor(s, id))
+    .filter((q): q is QuestDef => Boolean(q));
   const cleared = quests.filter((q) => isComplete(q, values[q.id] ?? 0)).length;
   return {
     values,
@@ -172,7 +240,7 @@ function summarize(activeIds: string[], values: Record<string, number>): DayReco
 function recompute(s: ProgressState): ProgressState {
   const log: Record<string, DayRecord> = {
     ...s.days,
-    [s.date]: summarize(s.activeQuestIds, s.values),
+    [s.date]: summarize(s, s.date, s.values),
   };
 
   let perfectDays = 0;
@@ -203,7 +271,7 @@ function recompute(s: ProgressState): ProgressState {
   for (const rec of Object.values(log)) {
     const seen = new Set<CategoryId>();
     for (const [id, value] of Object.entries(rec.values)) {
-      const quest = QUESTS_BY_ID[id];
+      const quest = questFor(s, id);
       if (quest && !seen.has(quest.category) && isComplete(quest, value)) {
         seen.add(quest.category);
       }
@@ -219,7 +287,7 @@ function rollDay(s: ProgressState): ProgressState {
   const key = todayKey();
   if (s.date === key) return s;
 
-  const finished = summarize(s.activeQuestIds, s.values);
+  const finished = summarize(s, s.date, s.values);
   const days = finished.total > 0 ? { ...s.days, [s.date]: finished } : s.days;
   return recompute({ ...s, days, date: key, values: {} });
 }
@@ -248,6 +316,8 @@ export function achievementProgress(
       return { current: s.categoryDays[a.track.category] ?? 0, goal: a.track.days };
     case 'questsCompleted':
       return { current: s.questCompletions, goal: a.track.count };
+    case 'plansMade':
+      return { current: s.plansAccepted, goal: a.track.count };
   }
 }
 
@@ -285,7 +355,7 @@ function cardContext(s: ProgressState): CardContext {
     date: s.date,
     // Today is included as a live record so a card can be earned the moment
     // its condition is met, not only after the day rolls over.
-    days: { ...s.days, [s.date]: summarize(s.activeQuestIds, s.values) },
+    days: { ...s.days, [s.date]: summarize(s, s.date, s.values) },
   };
 }
 
@@ -323,7 +393,13 @@ interface ProgressApi {
   pendingCard: CardDef | null;
   dismissCard: () => void;
   completeOnboarding: (profile: Profile) => void;
-  setSetting: (key: keyof Settings, value: boolean) => void;
+  setSetting: (key: keyof Settings, value: boolean | string) => void;
+  /** Turn an accepted briefing into the given day's quests. */
+  acceptPlan: (date: string, tasks: PlannedTask[], note: string) => void;
+  /** The plan stored for a day, if one was accepted. */
+  planFor: (date: string) => StoredPlan | undefined;
+  /** Wave tonight's briefing away until tomorrow. */
+  dismissBriefing: (date: string) => void;
   setProgress: (questId: string, value: number) => void;
   addProgress: (questId: string, amount: number) => void;
   clearQuest: (questId: string) => void;
@@ -333,53 +409,168 @@ interface ProgressApi {
 
 const Ctx = createContext<ProgressApi | null>(null);
 
+/** Read one storage key as an envelope, tolerating the pre-sync format. */
+async function readEnvelope(key: string): Promise<Envelope | null> {
+  try {
+    const raw = await storage.get(key);
+    return raw ? fromStored(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The signed-in account id, or null.
+ *
+ * Returns null immediately and forever when Supabase is unconfigured, which
+ * keeps the whole sync path dormant on a device that has never signed in —
+ * including the student's phone today.
+ */
+function useActiveAccountId(): string | null {
+  const [id, setId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!client) return;
+    let alive = true;
+
+    void client.auth
+      .getSession()
+      .then(({ data }) => {
+        if (alive) setId(data.session?.user?.id ?? null);
+      })
+      .catch(() => {});
+
+    const { data } = client.auth.onAuthStateChange((_event, session) => {
+      setId(session?.user?.id ?? null);
+    });
+
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  return id;
+}
+
 export function ProgressProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ProgressState>(() => recompute(blankState()));
-  const [ready, setReady] = useState(false);
+  /**
+   * Which account the loaded state belongs to — `undefined` before the first
+   * hydration, then the account id (or null for device-only).
+   *
+   * Readiness is derived from this rather than kept as its own flag so that
+   * switching accounts makes `ready` false on the very same render as the
+   * change, instead of needing a setState inside an effect to push it back.
+   */
+  const [readyFor, setReadyFor] = useState<string | null | undefined>(undefined);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const hydrated = useRef(false);
 
+  // Which Google account is active, or null for a device-only hunter. The key
+  // progress is stored under follows this, so switching accounts swaps the
+  // whole board rather than mixing two students together.
+  const accountId = useActiveAccountId();
+
+  /** False the instant the account changes, true once its state has loaded. */
+  const ready = readyFor === accountId;
+
+  // The timestamp of the most recent local change. Saved into the envelope and
+  // sent with the push, so the device copy and the server copy agree about
+  // when this device last moved — which is what the merge compares.
+  const stamp = useRef(new Date().toISOString());
+
   const store = useMemo(
     () =>
-      new PersistentStore<Omit<ProgressState, 'unlockQueue' | 'cardQueue'>>(STORAGE_KEY, (s, err) => {
+      new PersistentStore<Envelope>(keyFor(accountId), (s, err) => {
         setSaveState(s);
         setSaveError(err ?? null);
       }),
-    [],
+    [accountId],
   );
 
-  // Hydrate once, then roll the day over if the log is from an earlier day.
+  // Hydrate, then roll the day over if the log is from an earlier day.
+  //
+  // Runs again whenever the account changes. Signed out this is exactly what
+  // it always was: read one key, absorb, done — no network, no waiting. Signed
+  // in it additionally pulls the server copy and merges, and on a first-ever
+  // sign-in folds in whatever was recorded before there were accounts.
   useEffect(() => {
     let alive = true;
+    hydrated.current = false;
+
     (async () => {
-      const saved = await store.load();
-      if (alive && saved) {
+      const own = fromStored(await store.load());
+      let seed: Envelope | null = own;
+
+      if (accountId) {
+        const [cloud, device, adoptedBy] = await Promise.all([
+          pullProgress(accountId),
+          own ? Promise.resolve(null) : readEnvelope(DEVICE_KEY),
+          storage.get(ADOPTED_KEY).catch(() => null),
+        ]);
+
+        const choice = chooseSeed({ own, cloud, device, adoptedBy, userId: accountId });
+        seed = mergeAll(choice.parts);
+
+        // Claim the pre-account progress so the second Gmail starts clean.
+        if (choice.adoptsDevice) {
+          await storage.set(ADOPTED_KEY, accountId).catch(() => {});
+        }
+      }
+
+      if (!alive) return;
+
+      if (seed) {
         // absorb, not apply: past achievements must not replay on launch.
+        stamp.current = seed.updatedAt;
         setState(
           absorbCards(
             absorbUnlocks(
-              rollDay(recompute({ ...blankState(), ...saved, unlockQueue: [], cardQueue: [] })),
+              rollDay(recompute({ ...blankState(), ...seed.state, unlockQueue: [], cardQueue: [] })),
             ),
           ),
         );
+      } else {
+        // A brand-new account on this device starts from nothing rather than
+        // inheriting whoever used the app last.
+        stamp.current = new Date().toISOString();
+        setState(recompute(blankState()));
       }
-      if (alive) {
-        hydrated.current = true;
-        setReady(true);
-      }
+
+      hydrated.current = true;
+      setReadyFor(accountId);
     })();
+
     return () => {
       alive = false;
     };
-  }, [store]);
+  }, [store, accountId]);
 
   // Persist every change after hydration. The queue is stripped first.
   useEffect(() => {
     if (!hydrated.current) return;
     const { unlockQueue: _q, cardQueue: _c, ...persisted } = state;
-    store.save(persisted);
+    stamp.current = new Date().toISOString();
+    store.save(wrap(persisted, stamp.current));
   }, [state, store]);
+
+  // Push to the server well behind the local write.
+  //
+  // Local storage is the fast path and is never gated on the network; this is
+  // a background catch-up on a longer timer, so a burst of taps costs one
+  // request rather than twenty. A failure is deliberately silent — the next
+  // change retries, and the merge means nothing is lost by arriving late.
+  useEffect(() => {
+    if (!hydrated.current || !accountId) return;
+    const { unlockQueue: _q, cardQueue: _c, ...persisted } = state;
+    const at = stamp.current;
+    const timer = setTimeout(() => {
+      void pushProgress(accountId, persisted as PersistedState, at);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [state, accountId]);
 
   // Flush pending writes when the app leaves the foreground, so a student who
   // swipes the app away mid-session doesn't lose the last few taps — and roll
@@ -414,7 +605,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const applyValue = useCallback((questId: string, next: number) => {
     setState((s) => {
-      const quest = QUESTS_BY_ID[questId];
+      const quest = questFor(s, questId);
       if (!quest) return s;
 
       const base = rollDay(s);
@@ -442,7 +633,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
       if (nowDone !== wasDone) {
         const sign = nowDone ? 1 : -1;
-        draft.xp = Math.max(0, base.xp + sign * quest.xp);
+        // Work you committed to the night before pays more than work you
+        // happened to do — that is the whole incentive to plan.
+        const award = Math.round(quest.xp * (isPlannedId(questId) ? PLANNED_XP_MULTIPLIER : 1));
+        draft.xp = Math.max(0, base.xp + sign * award);
         draft.questCompletions = Math.max(0, base.questCompletions + sign);
         draft.stats = { ...base.stats };
         for (const [k, v] of Object.entries(quest.stats)) {
@@ -475,6 +669,34 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         ),
       setSetting: (key, value) =>
         setState((s) => ({ ...s, settings: { ...s.settings, [key]: value } })),
+      planFor: (date) => state.plans[date],
+      dismissBriefing: (date) => setState((s) => ({ ...s, briefingDismissed: date })),
+      acceptPlan: (date, tasks, note) =>
+        setState((s) => {
+          const planned = { ...s.planned };
+          for (const t of tasks) planned[t.id] = t;
+          // Re-planning the same day is fine — changing your mind at 22:00 is
+          // not cheating — but it is only paid for once. Otherwise the Status
+          // screen's "Plan tomorrow now" is a 200 XP button you can hold down
+          // all evening, and the Strategist trophy counts presses.
+          const firstPlanForDate = s.plans[date] === undefined;
+          return applyCards(
+            applyUnlocks(
+              recompute({
+                ...s,
+                planned,
+                plans: {
+                  ...s.plans,
+                  [date]: { taskIds: tasks.map((t) => t.id), note, acceptedAt: new Date().toISOString() },
+                },
+                plansAccepted: s.plansAccepted + (firstPlanForDate ? 1 : 0),
+                // Paid on acceptance, not on completion: the planning itself is
+                // the habit being trained.
+                xp: s.xp + (firstPlanForDate ? ACCEPT_PLAN_XP : 0),
+              }),
+            ),
+          );
+        }),
       setProgress: applyValue,
       addProgress: (id, amount) => applyValue(id, (state.values[id] ?? 0) + amount),
       clearQuest: (id) => applyValue(id, 0),
@@ -505,15 +727,18 @@ export function useProgress(): ProgressApi {
 export function useActiveQuests(): QuestDef[] {
   const { state } = useProgress();
   return useMemo(
-    () => state.activeQuestIds.map((id) => QUESTS_BY_ID[id]).filter(Boolean),
-    [state.activeQuestIds],
+    () =>
+      boardIdsFor(state, state.date)
+        .map((id) => questFor(state, id))
+        .filter((q): q is QuestDef => Boolean(q)),
+    [state],
   );
 }
 
 export function useDayStats() {
   const { state } = useProgress();
   return useMemo(() => {
-    const today = summarize(state.activeQuestIds, state.values);
+    const today = summarize(state, state.date, state.values);
     const { level, into, need } = levelFromXp(state.xp);
     return {
       done: today.cleared,
@@ -534,7 +759,7 @@ export function useDayStats() {
 export function useDayLog(): Record<string, DayRecord> {
   const { state } = useProgress();
   return useMemo(
-    () => ({ ...state.days, [state.date]: summarize(state.activeQuestIds, state.values) }),
+    () => ({ ...state.days, [state.date]: summarize(state, state.date, state.values) }),
     [state],
   );
 }
@@ -547,7 +772,7 @@ export function useRecentDays(count = 30): { date: string; cleared: number; tota
     for (let i = count - 1; i >= 0; i--) {
       const date = shiftDay(state.date, -i);
       const rec =
-        date === state.date ? summarize(state.activeQuestIds, state.values) : state.days[date];
+        date === state.date ? summarize(state, state.date, state.values) : state.days[date];
       out.push({
         date,
         cleared: rec?.cleared ?? 0,

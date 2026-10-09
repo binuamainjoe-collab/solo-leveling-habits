@@ -9,7 +9,7 @@ import { SystemText } from '@/components/system/SystemText';
 import {
   alpha,
   categoryMeta,
-  CATEGORIES,
+  BROWSABLE_CATEGORIES,
   palette,
   radius,
   rankMeta,
@@ -57,7 +57,7 @@ export default function ArchiveScreen() {
           QUEST ARCHIVE
         </SystemText>
         <SystemText variant="body" style={styles.sub}>
-          {QUESTS.length} objectives catalogued across {CATEGORIES.length} disciplines.
+          {QUESTS.length} objectives catalogued across {BROWSABLE_CATEGORIES.length} disciplines.
           {' '}Accept a quest to add it to your daily board.
         </SystemText>
       </View>
@@ -67,7 +67,7 @@ export default function ArchiveScreen() {
           with this few filters wrapping shows them all at once anyway. */}
       <View style={styles.filters}>
         <FilterChip label="ALL" active={filter === 'all'} color={palette.accent} onPress={() => setFilter('all')} />
-        {CATEGORIES.map((c) => (
+        {BROWSABLE_CATEGORIES.map((c) => (
           <FilterChip
             key={c}
             label={categoryMeta[c].short}

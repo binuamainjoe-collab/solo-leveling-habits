@@ -18,6 +18,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { UnlockOverlay } from '@/components/achievement/UnlockOverlay';
 import { CardRevealOverlay } from '@/components/card/CardRevealOverlay';
 import { BreathingExercise } from '@/components/system/BreathingGate';
+import { plannerConfigured } from '@/data/planner';
+import { rememberAccount } from '@/lib/auth';
+import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
 import { initMusic, resumeMusic, setMusicEnabled, suspendMusic } from '@/lib/music';
 import { palette } from '@/constants/theme';
@@ -50,9 +53,13 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false, contentStyle: styles.root }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+            <Stack.Screen name="briefing" options={{ animation: 'fade' }} />
+            <Stack.Screen name="signin" options={{ animation: 'fade' }} />
           </Stack>
           <FeedbackBridge />
+          <AuthBridge />
           <OnboardingGate />
+          <BriefingGate />
           <BreathingGate />
           <GlobalReveals />
         </ProgressProvider>
@@ -111,6 +118,75 @@ function FeedbackBridge() {
     });
     return () => sub.remove();
   }, []);
+
+  return null;
+}
+
+/**
+ * Keeps the auth session alive and the local account registry current.
+ *
+ * Does nothing at all when Supabase is unconfigured, which is the state the
+ * app ships in until the project exists — so this must stay a no-op rather
+ * than an error.
+ */
+function AuthBridge() {
+  useEffect(() => {
+    if (!supabaseConfigured() || !client) return;
+
+    bindAuthToAppState();
+
+    // A session restored from storage, or refreshed in the background, still
+    // needs its registry entry touched so the account switcher can order by
+    // most recently used.
+    const { data } = client.auth.onAuthStateChange((event, session) => {
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        void rememberAccount(session);
+      }
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  return null;
+}
+
+/**
+ * Offers the nightly briefing once the configured hour has passed, provided
+ * tomorrow has no plan yet and it wasn't waved away. Checked on a minute tick
+ * as well as on mount, so an app left open through the evening still catches
+ * the hour rather than waiting for a relaunch.
+ */
+function BriefingGate() {
+  const { ready, onboarded, state } = useProgress();
+  const segments = useSegments();
+  const router = useRouter();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !onboarded) return;
+    // No endpoint means the briefing could only ever show an error. Offering it
+    // nightly would be worse than not offering it at all.
+    if (!plannerConfigured()) return;
+    if (segments[0] === 'briefing' || segments[0] === 'onboarding') return;
+
+    const [h, m] = (state.settings?.briefingTime ?? '21:30').split(':').map(Number);
+    const now = new Date();
+    if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const key = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+
+    if (state.plans?.[key]) return;
+    if (state.briefingDismissed === key) return;
+
+    router.replace('/briefing');
+  }, [ready, onboarded, state, segments, router, tick]);
 
   return null;
 }

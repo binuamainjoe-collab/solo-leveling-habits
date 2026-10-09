@@ -74,6 +74,9 @@ const CATEGORY_ART: Record<CategoryId, ArtKey[]> = {
   care: ['dusk', 'sleep', 'bonds'],
   social: ['bonds', 'dusk', 'mastery'],
   wealth: ['fire', 'statue', 'burden'],
+  // Tonight's plan borrows the focus and resolve imagery — these are the tasks
+  // you chose for yourself, so they should look like intent rather than chore.
+  planned: ['focus', 'mastery', 'study', 'fire'],
 };
 
 /** Tiny deterministic hash, so a quest always draws the same image. */

@@ -41,3 +41,12 @@ example
 # generated native folders
 /ios
 /android
+
+# Netlify CLI state
+.netlify/
+
+# regenerated whenever the PC's LAN address changes
+expo-qr.png
+
+# local test scripts, not part of the app
+scratch/
