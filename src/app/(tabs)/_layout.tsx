@@ -10,9 +10,14 @@ import { playSound } from '@/lib/feedback';
 
 // `hunter` rather than `status`: Metro's dev server serves its own /status
 // endpoint, which shadows an app route of that name during development.
+//
+// Five is the ceiling at 375px. Archive lost its slot to Goal rather than a
+// sixth being squeezed in: browsing the quest catalogue is an occasional
+// setup task, reached from a button on the Quests screen, whereas a
+// long-term goal has to be visible every day or it quietly stops existing.
 const TABS = [
   { name: 'index', label: 'QUESTS', glyph: '⚔' },
-  { name: 'archive', label: 'ARCHIVE', glyph: '☰' },
+  { name: 'goal', label: 'GOAL', glyph: '◆' },
   { name: 'collection', label: 'CARDS', glyph: '◈' },
   { name: 'achievements', label: 'TROPHIES', glyph: '★' },
   { name: 'hunter', label: 'STATUS', glyph: '◉' },
@@ -26,6 +31,8 @@ export default function TabsLayout() {
       {TABS.map((t) => (
         <Tabs.Screen key={t.name} name={t.name} options={{ title: t.label }} />
       ))}
+      {/* Still a route, just not a tab — reached from the Quests screen. */}
+      <Tabs.Screen name="archive" options={{ title: 'ARCHIVE' }} />
     </Tabs>
   );
 }

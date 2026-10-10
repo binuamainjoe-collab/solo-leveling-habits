@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
@@ -173,6 +174,23 @@ export default function QuestBoardScreen() {
             />
           )}
         </Animated.View>
+
+        {/* Archive gave up its tab slot to Goal, so this is the way in. It
+            sits at the foot of the board because adding quests is something
+            you do occasionally, not every day. */}
+        <Pressable
+          onPress={() => {
+            playSound('tap');
+            router.push('/archive');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Browse the quest archive">
+          <View style={styles.archiveLink}>
+            <SystemText variant="label" color={palette.textMuted} style={styles.archiveLabel}>
+              ☰ BROWSE THE ARCHIVE
+            </SystemText>
+          </View>
+        </Pressable>
       </ScrollView>
     </Screen>
   );
@@ -298,6 +316,15 @@ const styles = StyleSheet.create({
   warningTitle: { fontSize: 13, letterSpacing: 1.4 },
   warningBody: { fontSize: 14, lineHeight: 19, marginTop: space.sm },
 
+  archiveLink: {
+    marginTop: space.xl,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    paddingVertical: space.md,
+  },
+  archiveLabel: { fontSize: 10, letterSpacing: 1.6 },
   switcher: { flexDirection: 'row', gap: space.sm, marginBottom: space.xl },
   pillWrap: { flex: 1 },
   pill: {

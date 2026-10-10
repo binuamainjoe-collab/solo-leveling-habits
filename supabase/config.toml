@@ -18,3 +18,25 @@ verify_jwt = true
 
 [functions.google]
 verify_jwt = true
+
+# The shadow army. Same gate as plan-tomorrow: no Supabase users are involved,
+# so there is no JWT to verify — the `x-app-secret` header plus the shared
+# 30-a-day cap is the whole protection.
+[functions.beru-scout]
+verify_jwt = false
+
+[functions.igris-judge]
+verify_jwt = false
+
+# Not an agent — no model calls, no budget. It exists so the app can reach
+# tables that are service-role only.
+[functions.goal-api]
+verify_jwt = false
+
+# The supervisor and the snapshot sink. Same x-app-secret gate; the cron job
+# that calls steward-report presents the secret from Vault.
+[functions.steward-report]
+verify_jwt = false
+
+[functions.log-snapshot]
+verify_jwt = false

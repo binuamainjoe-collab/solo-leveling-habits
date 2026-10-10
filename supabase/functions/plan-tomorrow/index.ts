@@ -119,7 +119,10 @@ async function claimCall(): Promise<{ ok: boolean; soft?: string }> {
       apikey: key,
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({ p_limit: DAILY_CAP }),
+    // `p_amount` is explicit even though it defaults to 1. The agents share
+    // this counter and reserve several calls at once, so relying on PostgREST
+    // to resolve an omitted default is a needless thing to be wrong about.
+    body: JSON.stringify({ p_limit: DAILY_CAP, p_amount: 1 }),
   });
 
   if (!res.ok) {

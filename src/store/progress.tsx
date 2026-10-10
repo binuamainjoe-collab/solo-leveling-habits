@@ -400,6 +400,13 @@ interface ProgressApi {
   planFor: (date: string) => StoredPlan | undefined;
   /** Wave tonight's briefing away until tomorrow. */
   dismissBriefing: (date: string) => void;
+  /**
+   * Award (or claw back) XP that did not come from clearing a quest —
+   * finishing a must-read finding, for instance. Negative amounts are
+   * allowed so un-marking something takes its reward back, which is what
+   * stops a toggle from being farmed.
+   */
+  addXp: (amount: number) => void;
   setProgress: (questId: string, value: number) => void;
   addProgress: (questId: string, amount: number) => void;
   clearQuest: (questId: string) => void;
@@ -697,6 +704,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             ),
           );
         }),
+      addXp: (amount) =>
+        setState((s) => (amount === 0 ? s : { ...s, xp: Math.max(0, s.xp + amount) })),
       setProgress: applyValue,
       addProgress: (id, amount) => applyValue(id, (state.values[id] ?? 0) + amount),
       clearQuest: (id) => applyValue(id, 0),
