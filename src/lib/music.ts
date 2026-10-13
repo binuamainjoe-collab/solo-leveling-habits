@@ -7,6 +7,13 @@ import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
  * effect is fired and forgotten, whereas the music is a long-lived thing that
  * has to loop, duck, pause when the app leaves the screen and resume when it
  * comes back.
+ *
+ * "Off" means there is no player at all, not a paused one. On Android,
+ * expo-audio remembers every player it paused itself — when the app went to
+ * the background, or another sound took audio focus — and plays it again when
+ * the app comes back. A pause from JS does not clear that memory, so a paused
+ * bed could start again on its own after the student had switched it off. A
+ * released player cannot be resumed by anything.
  */
 
 const SOURCE = require('@/assets/music/theme.mp3');
@@ -18,7 +25,12 @@ const SOURCE = require('@/assets/music/theme.mp3');
 const BASE_VOLUME = 0.22;
 
 let player: AudioPlayer | null = null;
-let enabled = true;
+/**
+ * Off until the saved setting says otherwise. Starting on the default and
+ * correcting after the store loads played the bed at every launch for as
+ * long as loading took — seconds, when signed in and waiting on the network.
+ */
+let enabled = false;
 /** True while the app is backgrounded, so resuming doesn't fight the setting. */
 let suspended = false;
 let started = false;
@@ -49,6 +61,7 @@ function safeRead<T>(read: () => T, fallback: T): T {
   }
 }
 
+/** Arms the bed. Nothing plays until `setMusicEnabled(true)`. */
 export function initMusic(): void {
   if (started) return;
   started = true;
@@ -60,11 +73,19 @@ export function initMusic(): void {
     };
   }
 
+  // The setting may have arrived first.
+  if (enabled && !suspended) start();
+}
+
+/** The player, built on first use. Null if the device refuses to make one. */
+function ensurePlayer(): AudioPlayer | null {
+  if (player) return player;
+
   try {
     player = createAudioPlayer(SOURCE);
   } catch (err) {
     note(`could not create the music player: ${String(err)}`);
-    return;
+    return null;
   }
 
   // Each property is set on its own, so an API that lacks one of them still
@@ -79,47 +100,49 @@ export function initMusic(): void {
   } catch (err) {
     note(`volume unsupported: ${String(err)}`);
   }
-
-  if (enabled) start();
+  return player;
 }
 
 function start(): void {
-  if (!player) return;
+  const p = ensurePlayer();
+  if (!p) return;
   try {
-    player.play();
+    p.play();
   } catch (err) {
     note(`play failed: ${String(err)}`);
   }
 }
 
-function stop(): void {
-  if (!player) return;
+/**
+ * Stop and destroy the player. Coming back builds a fresh one, which also
+ * means switching the music on again starts the track from the top rather
+ * than mid-phrase.
+ */
+function release(): void {
+  const p = player;
+  if (!p) return;
+  player = null;
   try {
-    player.pause();
+    p.pause();
+  } catch {
+    // Being released is the part that matters.
+  }
+  try {
+    p.remove();
   } catch (err) {
-    note(`pause failed: ${String(err)}`);
+    note(`release failed: ${String(err)}`);
   }
 }
 
-/** Turn the bed on or off. Restarts from the top rather than resuming. */
+/** Turn the bed on or off. Call only once the saved setting is known. */
 export function setMusicEnabled(on: boolean): void {
   enabled = on;
-  if (!player) return;
+  if (!started) return;
 
   if (on) {
     if (!suspended) start();
   } else {
-    stop();
-    // Coming back should feel like putting the record on again, not like
-    // resuming mid-phrase from wherever it happened to be cut off.
-    try {
-      const seek = player.seekTo(0) as unknown;
-      if (seek && typeof (seek as Promise<void>).catch === 'function') {
-        (seek as Promise<void>).catch(() => {});
-      }
-    } catch {
-      // Rewinding is a nicety; being paused is the part that matters.
-    }
+    release();
   }
 }
 
@@ -127,7 +150,12 @@ export function setMusicEnabled(on: boolean): void {
  *  whatever the student switched to. */
 export function suspendMusic(): void {
   suspended = true;
-  stop();
+  if (!player) return;
+  try {
+    player.pause();
+  } catch (err) {
+    note(`pause failed: ${String(err)}`);
+  }
 }
 
 export function resumeMusic(): void {

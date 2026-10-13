@@ -12,7 +12,7 @@ import type { Rank } from '@/constants/theme';
  * under plain Node.
  */
 
-export type AgentId = 'beru-scout' | 'igris-judge';
+export type AgentId = 'beru-scout' | 'igris-judge' | 'steward-report';
 
 export interface AgentDef {
   id: AgentId;
@@ -57,7 +57,56 @@ export const AGENTS: AgentDef[] = [
     // Every unscored finding in a single pass.
     callCost: 1,
   },
+  {
+    id: 'steward-report',
+    name: 'The Steward',
+    role: 'Overseer',
+    blurb: 'Watches the other shadows and your own record, and reports once a day without flattering you.',
+    rank: 'S',
+    glyph: '◉',
+    // Runs itself at 20:00, but can be asked for a reading at any time.
+    summonable: true,
+    callCost: 1,
+  },
 ];
+
+/* ----------------------------------------------------------- the report */
+
+export type ReportStatus = 'sent' | 'fallback' | 'failed';
+
+export interface ReportProblem {
+  text: string;
+  fix: string;
+  fix_minutes: number;
+}
+
+/** The narration, as the Steward's panel shows it. */
+export interface ReportBody {
+  headline: string;
+  wins: string[];
+  problems: ReportProblem[];
+  top_finding_comment: string;
+  tomorrow_focus: string[];
+}
+
+export interface Report {
+  id: string;
+  date: string;
+  status: ReportStatus;
+  body: ReportBody | null;
+  emailId: string | null;
+  error: string | null;
+  createdAt: string;
+}
+
+/**
+ * Whether the reading came from the model or from the deterministic
+ * template. Worth showing: a fallback means narration failed, and hiding
+ * that would make a degraded report look like a normal one.
+ */
+export function isFallback(report: Report | null): boolean {
+  return report?.status === 'fallback';
+}
 
 export function agentById(id: AgentId): AgentDef | undefined {
   return AGENTS.find((a) => a.id === id);

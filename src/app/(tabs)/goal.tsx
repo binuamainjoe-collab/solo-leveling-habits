@@ -4,6 +4,7 @@ import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
+import { ReportOverlay } from '@/components/system/ReportOverlay';
 import { Screen } from '@/components/system/Screen';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, font, palette, radius, rankMeta, space } from '@/constants/theme';
@@ -16,6 +17,7 @@ import {
   type AgentDef,
   type AgentRun,
   type Finding,
+  type Report,
   type Verdict,
 } from '@/data/agents';
 import { artFor } from '@/data/cardArt';
@@ -23,8 +25,10 @@ import { validateGoalTitle } from '@/data/goals';
 import { feedback, playSound } from '@/lib/feedback';
 import {
   fetchGoalState,
+  fetchLatestReport,
   markFindingRead,
   runScout,
+  runSteward,
   setGoal as saveGoal,
   shadowsConfigured,
   type GoalState,
@@ -62,6 +66,10 @@ export default function GoalScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
+  // The Steward's reading, and whether its panel is open over the screen.
+  const [report, setReport] = useState<Report | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+
   const load = useCallback(async () => {
     if (!configured) return;
     const res = await fetchGoalState();
@@ -82,7 +90,9 @@ export default function GoalScreen() {
     let alive = true;
 
     (async () => {
-      const res = await fetchGoalState();
+      // Both in one pass: the report is independent of the goal, and
+      // serialising them would show a half-populated screen for a beat.
+      const [res, rep] = await Promise.all([fetchGoalState(), fetchLatestReport()]);
       if (!alive) return;
       if (res.ok && res.data) {
         setState(res.data);
@@ -90,6 +100,7 @@ export default function GoalScreen() {
       } else {
         setError(res.error ?? 'The System could not reach your goal.');
       }
+      if (rep.ok) setReport(rep.data ?? null);
       setLoading(false);
     })();
 
@@ -125,6 +136,26 @@ export default function GoalScreen() {
     setError(null);
     setNotice(null);
 
+    // The Steward reads rather than searches, so it reports differently and
+    // opens its panel the moment it has something to say.
+    if (agent.id === 'steward-report') {
+      const res = await runSteward();
+      if (res.ok && res.data) {
+        feedback('complete', 'success');
+        const fresh = await fetchLatestReport();
+        if (fresh.ok) setReport(fresh.data ?? null);
+        setReportOpen(true);
+        if (res.data.delivery === 'email-failed') {
+          setNotice('The reading is ready, but the email did not send.');
+        }
+        await load();
+      } else {
+        setError(res.error ?? 'The Steward had nothing to say.');
+      }
+      setBusy(null);
+      return;
+    }
+
     const res = await runScout();
     if (res.ok && res.data) {
       feedback('complete', 'success');
@@ -141,6 +172,12 @@ export default function GoalScreen() {
       setError(res.error ?? 'The shadow did not return.');
     }
     setBusy(null);
+  }
+
+  /** Open the last reading without spending a call on a new one. */
+  function openReport() {
+    playSound('tap');
+    setReportOpen(true);
   }
 
   async function toggleRead(finding: Finding) {
@@ -248,6 +285,8 @@ export default function GoalScreen() {
                       busy={busy === agent.id}
                       disabled={busy !== null}
                       onSummon={() => void summon(agent)}
+                      report={agent.id === 'steward-report' ? report : null}
+                      onOpenReport={openReport}
                     />
                   </Animated.View>
                 ))}
@@ -303,6 +342,10 @@ export default function GoalScreen() {
           </>
         )}
       </ScrollView>
+
+      {reportOpen && report ? (
+        <ReportOverlay report={report} onClose={() => setReportOpen(false)} />
+      ) : null}
     </Screen>
   );
 }
@@ -322,6 +365,8 @@ function ShadowCard({
   busy,
   disabled,
   onSummon,
+  report,
+  onOpenReport,
 }: {
   agent: AgentDef;
   run: AgentRun | null;
@@ -329,6 +374,9 @@ function ShadowCard({
   busy: boolean;
   disabled: boolean;
   onSummon: () => void;
+  /** Only the Steward has one. */
+  report?: Report | null;
+  onOpenReport?: () => void;
 }) {
   const meta = rankMeta[agent.rank];
 
@@ -337,6 +385,8 @@ function ShadowCard({
   else if (run?.status === 'error') status = run.error ? `Failed — ${run.error}` : 'Failed.';
   else if (run?.status === 'running') status = 'Out there now.';
   if (!agent.summonable && pending > 0) status = `${pending} waiting on a ruling.`;
+  // The Steward's own last reading says more than its run row does.
+  if (report) status = `Last reading ${report.date}${report.status === 'fallback' ? ' (no narration)' : ''}.`;
 
   return (
     <Card raised style={styles.shadowCard} contentStyle={styles.shadowInner}>
@@ -361,13 +411,27 @@ function ShadowCard({
         {status}
       </SystemText>
 
+      {report && onOpenReport ? (
+        <ActionButton label="◉ Read the last report" onPress={onOpenReport} disabled={disabled} primary />
+      ) : null}
+
       {agent.summonable ? (
         <ActionButton
-          label={busy ? 'Out there…' : `Send ${agent.name} out`}
+          label={
+            busy
+              ? 'Out there…'
+              : agent.id === 'steward-report'
+                ? report
+                  ? 'Ask for a fresh reading'
+                  : 'Ask for a reading'
+                : `Send ${agent.name} out`
+          }
           onPress={onSummon}
           disabled={disabled}
           busy={busy}
-          primary
+          // Only one orange element per card: once a report exists, reading
+          // it is the primary action and asking for a new one steps back.
+          primary={!report}
         />
       ) : (
         <SystemText variant="meta" style={styles.autoNote}>

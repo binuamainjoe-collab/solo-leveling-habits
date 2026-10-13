@@ -83,6 +83,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
+    /**
+     * The newest report, for the Steward's panel.
+     *
+     * `facts` is deliberately not returned: it is a large audit blob the
+     * screen has no use for, and keeping it server-side means the only
+     * thing that ever reaches a device is the handful of sentences meant
+     * to be read.
+     */
+    case 'report.latest': {
+      const { data, error } = await db
+        .from('reports')
+        .select('id, date, status, report, email_id, error, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        console.error('report read failed', error.message);
+        return fail('The System could not read the last report.', 500);
+      }
+      return json({ report: data ?? null });
+    }
+
     case 'goal.list': {
       const { data, error } = await db
         .from('goals')

@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { FlatList, RectButton } from 'react-native-gesture-handler';
 
 import { AchievementCard } from '@/components/achievement/AchievementCard';
-import { Screen, useContentWidth } from '@/components/system/Screen';
+import { useContentWidth } from '@/components/system/Screen';
 import { Card } from '@/components/system/Card';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, palette, radius, space } from '@/constants/theme';
@@ -22,7 +22,13 @@ const FILTERS: { key: Filter; label: string; color: string }[] = [
   { key: 'mythic', label: 'MYTHIC', color: tierMeta.mythic.color },
 ];
 
-export default function AchievementsScreen() {
+/**
+ * The trophy hall, as one half of the Collection tab.
+ *
+ * Was its own tab until the Planner needed the slot; the content is
+ * unchanged, only the screen wrapper and title moved up to the tab.
+ */
+export function TrophiesPanel() {
   const { state } = useProgress();
   const { width, columns } = useContentWidth();
   const [filter, setFilter] = useState<Filter>('all');
@@ -81,11 +87,8 @@ export default function AchievementsScreen() {
   const totalXp = ACHIEVEMENTS.filter((a) => unlockedSet.has(a.id)).reduce((s, a) => s + a.xp, 0);
 
   return (
-    <Screen>
+    <View style={styles.panel}>
       <View style={styles.head}>
-        <SystemText variant="heading" style={styles.heading}>
-          TROPHY HALL
-        </SystemText>
         <Card contentStyle={styles.summary}>
           <View style={styles.summaryItem}>
             <SystemText variant="label">UNLOCKED</SystemText>
@@ -155,13 +158,13 @@ export default function AchievementsScreen() {
           </Card>
         }
       />
-    </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  panel: { flex: 1 },
   head: { marginBottom: space.lg },
-  heading: { fontSize: 30, letterSpacing: -0.5, marginBottom: space.md },
   summary: { flexDirection: 'row', alignItems: 'center', padding: space.lg },
   summaryItem: { flex: 1, gap: 2, minWidth: 0 },
   // 40px numerals overflow a third of a phone screen once XP hits four digits.

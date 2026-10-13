@@ -14,6 +14,7 @@ import Animated, {
 import { QuestCard } from '@/components/quest/QuestCard';
 import { Card } from '@/components/system/Card';
 import { Screen, useContentWidth } from '@/components/system/Screen';
+import { PlanNudge } from '@/components/planner/PlanNudge';
 import { StatusHeader } from '@/components/system/StatusHeader';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, categoryMeta, palette, radius, space, type CategoryId } from '@/constants/theme';
@@ -94,6 +95,8 @@ export default function QuestBoardScreen() {
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <StatusHeader />
+
+        <PlanNudge />
 
         {mandatory.length > 0 ? (
           <Card

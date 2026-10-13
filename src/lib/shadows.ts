@@ -1,5 +1,14 @@
 import type { Rank } from '@/constants/theme';
-import type { AgentId, AgentRun, Finding, RunStatus, Verdict } from '@/data/agents';
+import type {
+  AgentId,
+  AgentRun,
+  Finding,
+  Report,
+  ReportBody,
+  ReportStatus,
+  RunStatus,
+  Verdict,
+} from '@/data/agents';
 import type { Goal } from '@/data/goals';
 
 /**
@@ -186,4 +195,55 @@ export async function runScout(): Promise<ShadowResult<ScoutOutcome>> {
 /** Re-rule on anything a failed run left unjudged. */
 export async function runJudge(): Promise<ShadowResult<{ judged: number; mustRead: number }>> {
   return call<{ judged: number; mustRead: number }>('igris-judge', {});
+}
+
+/* ---------------------------------------------------------- the Steward */
+
+interface RawReport {
+  id: string;
+  date: string;
+  status: string;
+  report: ReportBody | null;
+  email_id: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+function toReport(r: RawReport): Report {
+  return {
+    id: r.id,
+    date: r.date,
+    status: (['sent', 'fallback', 'failed'].includes(r.status) ? r.status : 'failed') as ReportStatus,
+    body: r.report,
+    emailId: r.email_id,
+    error: r.error,
+    createdAt: r.created_at,
+  };
+}
+
+/** The most recent reading, for the Steward's panel. */
+export async function fetchLatestReport(): Promise<ShadowResult<Report | null>> {
+  const res = await call<{ report: RawReport | null }>('goal-api', { op: 'report.latest' });
+  if (!res.ok || !res.data) return { ok: false, error: res.error };
+  return { ok: true, data: res.data.report ? toReport(res.data.report) : null };
+}
+
+export interface StewardOutcome {
+  status: ReportStatus;
+  date: string;
+  /** 'stored' when no email is configured — which is a success, not a gap. */
+  delivery: 'stored' | 'emailed' | 'email-failed';
+  alert: boolean;
+  anomalies: { code: string; severity: string }[];
+  error: string | null;
+}
+
+/**
+ * Ask for a reading now rather than waiting for 20:00.
+ *
+ * `force` bypasses both the hour gate and the once-a-day guard, which is
+ * exactly what a manual request should do.
+ */
+export async function runSteward(): Promise<ShadowResult<StewardOutcome>> {
+  return call<StewardOutcome>('steward-report', { force: true });
 }

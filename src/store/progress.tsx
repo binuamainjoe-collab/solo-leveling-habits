@@ -13,7 +13,8 @@ import { AppState } from 'react-native';
 import { ACHIEVEMENTS, type AchievementDef } from '@/data/achievements';
 import { CARDS_BY_ID, earnedCards, type CardContext, type CardDef } from '@/data/cards';
 import { buildPlan, type Profile } from '@/data/profile';
-import { isPlannedId, plannedToQuest, type PlannedTask } from '@/data/planner';
+import { blocksToTasks, isPlannedId, plannedToQuest, type PlannedTask } from '@/data/planner';
+import type { DraftPlan, PlanBlock } from '@/data/timeline';
 import { isCeilingQuest, isComplete, windowState } from '@/data/completion';
 import { DEFAULT_ACTIVE, QUESTS_BY_ID, type QuestDef } from '@/data/quests';
 import { CATEGORIES, RANKS, type CategoryId, type Rank, type StatKey } from '@/constants/theme';
@@ -51,13 +52,26 @@ export interface Settings {
   music: boolean;
   /** 24h "HH:MM" after which the nightly briefing offers itself. */
   briefingTime: string;
+  /**
+   * When the student usually wakes and sleeps, remembered from their last
+   * finalised plan so the planner does not have to ask every night.
+   * Optional because saves from before the timeline planner lack them.
+   */
+  wake?: string;
+  sleep?: string;
 }
 
-/** An accepted nightly plan, stored against the day it is FOR. */
+/** An accepted plan, stored against the day it is FOR. */
 export interface StoredPlan {
   taskIds: string[];
   note: string;
   acceptedAt: string;
+  /**
+   * The full day as a timeline — fixed commitments, placed habits and
+   * breaks as well as the tasks. Absent on plans made by the first planner,
+   * which had no times.
+   */
+  timeline?: { wake: string; sleep: string; blocks: PlanBlock[] };
 }
 
 export interface ProgressState {
@@ -394,8 +408,12 @@ interface ProgressApi {
   dismissCard: () => void;
   completeOnboarding: (profile: Profile) => void;
   setSetting: (key: keyof Settings, value: boolean | string) => void;
-  /** Turn an accepted briefing into the given day's quests. */
-  acceptPlan: (date: string, tasks: PlannedTask[], note: string) => void;
+  /**
+   * Save a validated timeline as the given day's plan. Its task blocks
+   * become one-tap quests on that day's board; fixed blocks and breaks are
+   * kept for the timeline only.
+   */
+  finalizePlan: (date: string, draft: DraftPlan) => void;
   /** The plan stored for a day, if one was accepted. */
   planFor: (date: string) => StoredPlan | undefined;
   /** Wave tonight's briefing away until tomorrow. */
@@ -678,8 +696,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         setState((s) => ({ ...s, settings: { ...s.settings, [key]: value } })),
       planFor: (date) => state.plans[date],
       dismissBriefing: (date) => setState((s) => ({ ...s, briefingDismissed: date })),
-      acceptPlan: (date, tasks, note) =>
+      finalizePlan: (date, draft) =>
         setState((s) => {
+          const tasks: PlannedTask[] = blocksToTasks(draft);
           const planned = { ...s.planned };
           for (const t of tasks) planned[t.id] = t;
           // Re-planning the same day is fine — changing your mind at 22:00 is
@@ -692,9 +711,16 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
               recompute({
                 ...s,
                 planned,
+                // Remembered so the next plan can skip asking.
+                settings: { ...s.settings, wake: draft.wake, sleep: draft.sleep },
                 plans: {
                   ...s.plans,
-                  [date]: { taskIds: tasks.map((t) => t.id), note, acceptedAt: new Date().toISOString() },
+                  [date]: {
+                    taskIds: tasks.map((t) => t.id),
+                    note: draft.note,
+                    acceptedAt: new Date().toISOString(),
+                    timeline: { wake: draft.wake, sleep: draft.sleep, blocks: draft.blocks },
+                  },
                 },
                 plansAccepted: s.plansAccepted + (firstPlanForDate ? 1 : 0),
                 // Paid on acceptance, not on completion: the planning itself is

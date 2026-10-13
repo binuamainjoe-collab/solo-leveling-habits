@@ -15,6 +15,7 @@
 import {
   admin,
   checkSecret,
+  claimCalls,
   fail,
   finishRun,
   gemini,
@@ -198,15 +199,22 @@ async function narrate(
 
 /* --------------------------------------------------------------- 7. send */
 
+/**
+ * Deliver the report by email, if email is set up at all.
+ *
+ * Email is an optional delivery channel, not the report itself. The report
+ * is always written to `reports`, and the Goal screen reads it from there —
+ * so a project with no Resend credentials is a perfectly working
+ * configuration, and must not be treated as a failed run.
+ */
 async function sendEmail(
   subject: string,
   html: string,
   text: string,
-): Promise<{ id?: string; error?: string }> {
+): Promise<{ id?: string; error?: string; skipped?: boolean }> {
   const key = Deno.env.get('RESEND_API_KEY');
   const to = Deno.env.get('REPORT_TO_EMAIL');
-  if (!key) return { error: 'RESEND_API_KEY is not set on this project.' };
-  if (!to) return { error: 'REPORT_TO_EMAIL is not set on this project.' };
+  if (!key || !to) return { skipped: true };
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -289,18 +297,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let durationMs = 0;
   let tokens = { in: 0, out: 0, thoughts: 0 };
 
-  // The cap is shared with the other shadows. A day that has spent it is
-  // exactly the day a report is worth having, so run the deterministic
-  // template rather than going silent.
-  const capExhausted = facts.usage.calls_today >= DAILY_CAP;
-
   if (forceFallback) {
     narrationError = 'force_fallback was requested';
-  } else if (capExhausted) {
-    narrationError = `daily cap of ${DAILY_CAP} already spent; narration skipped`;
   } else {
     let violations: string[] = [];
     for (let attempt = 0; attempt < 2; attempt++) {
+      // Reserve before each model call, not once up front.
+      //
+      // Reserving here rather than merely reading `facts.usage` is the point:
+      // a Steward that checked the counter without adding to it could run
+      // unlimited times and would quietly under-report every other agent's
+      // share of the budget. Claiming per attempt also means the retry costs
+      // exactly one more, and a day with nothing left falls through to the
+      // template — which is precisely the day a report is worth having.
+      const claim = await claimCalls(db, 1);
+      if (!claim.ok) {
+        narrationError =
+          narrationError ?? `daily cap of ${DAILY_CAP} reached; narration skipped`;
+        break;
+      }
+
       const out = await narrate(facts, violations);
       durationMs += out.durationMs ?? 0;
       if (out.modelVersion) modelVersion = out.modelVersion;
@@ -339,9 +355,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const mail = renderEmail(facts, narration, anomalies);
   const sent = await sendEmail(mail.subject, mail.html, mail.text);
 
+  // A send that fails is worth recording, but the report itself still
+  // exists and the app can still show it — so the status stays a statement
+  // about the narration, not about the postman.
   if (sent.error) {
-    status = 'failed';
-    narrationError = [narrationError, sent.error].filter(Boolean).join(' | ');
+    narrationError = [narrationError, `email: ${sent.error}`].filter(Boolean).join(' | ');
   }
 
   // ------------------------------------------------------------ 8. persist
@@ -370,6 +388,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     subject: mail.subject,
     anomalies: anomalies.map((a) => ({ code: a.code, severity: a.severity })),
     alert: hasCritical(anomalies),
+    // 'stored' is a success: the report is in the table for the app to read.
+    delivery: sent.skipped ? 'stored' : sent.id ? 'emailed' : 'email-failed',
     email_id: sent.id ?? null,
     model_version: modelVersion ?? null,
     error: narrationError,

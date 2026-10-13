@@ -179,14 +179,14 @@ export default function HunterScreen() {
           </Card>
 
           <SystemText variant="label" style={styles.sectionLabel}>
-            Nightly briefing
+            Planner reminder
           </SystemText>
           <Card style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
-              After this hour the System offers to plan tomorrow with you. Say roughly what you
-              want to get done; it comes back with an unhurried order and room to breathe.
+              From this hour, the Quests board quietly offers to plan tomorrow with you. It never
+              takes over the screen.
               {state.plansAccepted > 0
-                ? ` ${state.plansAccepted} plan${state.plansAccepted === 1 ? '' : 's'} accepted so far.`
+                ? ` ${state.plansAccepted} plan${state.plansAccepted === 1 ? '' : 's'} made so far.`
                 : ''}
             </SystemText>
             <TimeChips
@@ -198,15 +198,15 @@ export default function HunterScreen() {
             />
             {plannerConfigured() ? (
               <GhostButton
-                label="▶ Plan tomorrow now"
+                label="◷ Open the Planner"
                 onPress={() => {
                   playSound('tap');
-                  router.push('/briefing');
+                  router.push('/planner');
                 }}
               />
             ) : (
               <SystemText variant="meta" style={styles.notConnected}>
-                Not connected yet — the planner needs its endpoint before a briefing can run.
+                Not connected yet — the planner needs its endpoint before it can run.
               </SystemText>
             )}
           </Card>

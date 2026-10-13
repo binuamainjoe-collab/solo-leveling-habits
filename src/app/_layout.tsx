@@ -18,7 +18,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { UnlockOverlay } from '@/components/achievement/UnlockOverlay';
 import { CardRevealOverlay } from '@/components/card/CardRevealOverlay';
 import { BreathingExercise } from '@/components/system/BreathingGate';
-import { plannerConfigured } from '@/data/planner';
 import { rememberAccount } from '@/lib/auth';
 import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
@@ -53,13 +52,12 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false, contentStyle: styles.root }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
-            <Stack.Screen name="briefing" options={{ animation: 'fade' }} />
+            <Stack.Screen name="planner-chat" />
             <Stack.Screen name="signin" options={{ animation: 'fade' }} />
           </Stack>
           <FeedbackBridge />
           <AuthBridge />
           <OnboardingGate />
-          <BriefingGate />
           <BreathingGate />
           <GlobalReveals />
         </ProgressProvider>
@@ -94,7 +92,7 @@ function OnboardingGate() {
  * reading the store, so a sound can fire from anywhere without a hook.
  */
 function FeedbackBridge() {
-  const { state } = useProgress();
+  const { state, ready } = useProgress();
   const sound = state.settings?.sound ?? true;
   const haptics = state.settings?.haptics ?? true;
   const music = state.settings?.music ?? true;
@@ -107,8 +105,14 @@ function FeedbackBridge() {
   useEffect(() => {
     setSoundEnabled(sound);
     setHapticsEnabled(haptics);
-    setMusicEnabled(music);
-  }, [sound, haptics, music]);
+  }, [sound, haptics]);
+
+  // Music waits for the saved setting. Before the store has loaded, `music`
+  // is only the default, and acting on it played the bed at every launch for
+  // a student who had switched it off.
+  useEffect(() => {
+    if (ready) setMusicEnabled(music);
+  }, [ready, music]);
 
   // The bed must never play over whatever the student switched away to.
   useEffect(() => {
@@ -146,47 +150,6 @@ function AuthBridge() {
 
     return () => data.subscription.unsubscribe();
   }, []);
-
-  return null;
-}
-
-/**
- * Offers the nightly briefing once the configured hour has passed, provided
- * tomorrow has no plan yet and it wasn't waved away. Checked on a minute tick
- * as well as on mount, so an app left open through the evening still catches
- * the hour rather than waiting for a relaunch.
- */
-function BriefingGate() {
-  const { ready, onboarded, state } = useProgress();
-  const segments = useSegments();
-  const router = useRouter();
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    if (!ready || !onboarded) return;
-    // No endpoint means the briefing could only ever show an error. Offering it
-    // nightly would be worse than not offering it at all.
-    if (!plannerConfigured()) return;
-    if (segments[0] === 'briefing' || segments[0] === 'onboarding') return;
-
-    const [h, m] = (state.settings?.briefingTime ?? '21:30').split(':').map(Number);
-    const now = new Date();
-    if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const key = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
-
-    if (state.plans?.[key]) return;
-    if (state.briefingDismissed === key) return;
-
-    router.replace('/briefing');
-  }, [ready, onboarded, state, segments, router, tick]);
 
   return null;
 }

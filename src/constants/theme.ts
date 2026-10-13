@@ -111,7 +111,9 @@ export const categoryMeta: Record<
   wealth: { label: 'Resource Management', short: 'GOLD', color: '#D9A441', glyph: '◆' },
   // Deliberately a neutral platinum: tonight's plan should read as issued by
   // the System rather than belonging to any one discipline.
-  planned: { label: "Tomorrow's Plan", short: 'PLAN', color: '#C5CBD6', glyph: '✧' },
+  // On the board this only ever shows the plan for the day being viewed —
+  // which is today. "Tomorrow's Plan" was wrong on the one day it appeared.
+  planned: { label: "Today's Plan", short: 'PLAN', color: '#C5CBD6', glyph: '✧' },
 };
 
 /** The eight disciplines you can actually browse and accept quests from. */

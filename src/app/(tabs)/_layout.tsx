@@ -15,11 +15,15 @@ import { playSound } from '@/lib/feedback';
 // sixth being squeezed in: browsing the quest catalogue is an occasional
 // setup task, reached from a button on the Quests screen, whereas a
 // long-term goal has to be visible every day or it quietly stops existing.
+//
+// The Planner sits next to Quests because they are two views of the same day:
+// what you do, and when. Cards and Trophies share Collection to make room —
+// both are things earned, neither is something you act on daily.
 const TABS = [
   { name: 'index', label: 'QUESTS', glyph: '⚔' },
+  { name: 'planner', label: 'PLANNER', glyph: '◷' },
   { name: 'goal', label: 'GOAL', glyph: '◆' },
-  { name: 'collection', label: 'CARDS', glyph: '◈' },
-  { name: 'achievements', label: 'TROPHIES', glyph: '★' },
+  { name: 'collection', label: 'COLLECTION', glyph: '◈' },
   { name: 'hunter', label: 'STATUS', glyph: '◉' },
 ] as const;
 
