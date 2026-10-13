@@ -1,0 +1,233 @@
+=== bug-log — overnight sweep, branch bugfix/overnight-2026-10-13, 2026-10-13T23:38:08+02:00 ===
+
+=== 1. npm install ===
+
+up to date, audited 1274 packages in 18s
+
+224 packages are looking for funding
+  run `npm fund` for details
+
+61 vulnerabilities (1 low, 25 moderate, 34 high, 1 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+npm warn allow-scripts 3 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   dtrace-provider@0.8.8 (install: node-gyp rebuild)
+npm warn allow-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+npm warn allow-scripts   unrs-resolver@1.12.2 (postinstall: node postinstall.js)
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+exit code: 0
+
+=== 2. npx tsc --noEmit ===
+exit code: 0
+
+=== 3. npm run lint ===
+
+> scaffold@1.0.0 lint
+> expo lint
+
+env: load .env.local
+env: export EXPO_PUBLIC_APP_SECRET EXPO_PUBLIC_PLANNER_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+exit code: 0
+
+=== 4. npx expo-doctor ===
+env: load .env.local
+env: export EXPO_PUBLIC_APP_SECRET EXPO_PUBLIC_PLANNER_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+Running 21 checks on your project...
+17/21 checks passed. 4 checks failed. Possible issues detected:
+Use the --verbose flag to see more details about passed checks.
+
+✖ Check for legacy global CLI installed locally
+EAS CLI should not be installed in your project. Instead, install it globally or use "npx", "pnpx", or "bunx" depending on your preferred package manager.
+Advice:
+Remove eas-cli from your project dependencies.
+
+✖ Check that required peer dependencies are installed
+Missing peer dependency: expo-asset
+Required by: expo-audio
+Advice:
+Install missing required peer dependency with "npx expo install expo-asset"
+Your app may crash outside of Expo Go without this dependency. Native module peer dependencies must be installed directly.
+
+✖ Check that no duplicate dependencies are installed
+Your project contains duplicate native module dependencies, which should be de-duplicated.
+Native builds may only contain one version of any given native module, and having multiple versions of a single Native module installed may lead to unexpected build errors.
+Found duplicates for expo-constants:
+  ├─ expo-constants@57.0.17 (at: node_modules\expo-constants)
+  ├─ expo-constants@57.0.21 (at: node_modules\expo-auth-session\node_modules\expo-constants)
+  └─ expo-constants@57.0.21 (at: node_modules\expo-linking\node_modules\expo-constants)
+Found duplicates for expo-web-browser:
+  ├─ expo-web-browser@57.0.2 (at: node_modules\expo-web-browser)
+  └─ expo-web-browser@57.0.3 (at: node_modules\expo-auth-session\node_modules\expo-web-browser)
+Advice:
+Resolve your dependency issues and deduplicate your dependencies. Learn more: https://expo.fyi/resolving-dependency-issues
+
+✖ Check that packages match versions required by installed Expo SDK
+
+🔧 Patch version mismatches
+package               expected  found    
+@expo/ui              ~57.0.23  57.0.17  
+expo                  ~57.0.28  57.0.21  
+expo-auth-session     ~57.0.15  57.0.14  
+expo-constants        ~57.0.21  57.0.17  
+expo-crypto           ~57.0.4   57.0.3   
+expo-device           ~57.0.2   57.0.1   
+expo-font             ~57.0.4   57.0.3   
+expo-glass-effect     ~57.0.4   57.0.2   
+expo-haptics          ~57.0.3   57.0.2   
+expo-image            ~57.0.5   57.0.4   
+expo-linear-gradient  ~57.0.2   57.0.1   
+expo-router           ~57.0.26  57.0.20  
+expo-splash-screen    ~57.0.10  57.0.8   
+expo-symbols          ~57.0.3   57.0.2   
+expo-system-ui        ~57.0.4   57.0.3   
+expo-web-browser      ~57.0.3   57.0.2   
+
+Changelogs:
+- expo-auth-session → https://github.com/expo/expo/blob/sdk-57/packages/expo-auth-session/CHANGELOG.md
+- expo-constants → https://github.com/expo/expo/blob/sdk-57/packages/expo-constants/CHANGELOG.md
+- expo-crypto → https://github.com/expo/expo/blob/sdk-57/packages/expo-crypto/CHANGELOG.md
+- expo-device → https://github.com/expo/expo/blob/sdk-57/packages/expo-device/CHANGELOG.md
+- expo-font → https://github.com/expo/expo/blob/sdk-57/packages/expo-font/CHANGELOG.md
+- expo-glass-effect → https://github.com/expo/expo/blob/sdk-57/packages/expo-glass-effect/CHANGELOG.md
+- expo-haptics → https://github.com/expo/expo/blob/sdk-57/packages/expo-haptics/CHANGELOG.md
+- expo-image → https://github.com/expo/expo/blob/sdk-57/packages/expo-image/CHANGELOG.md
+- expo-linear-gradient → https://github.com/expo/expo/blob/sdk-57/packages/expo-linear-gradient/CHANGELOG.md
+- expo-router → https://github.com/expo/expo/blob/sdk-57/packages/expo-router/CHANGELOG.md
+- expo-splash-screen → https://github.com/expo/expo/blob/sdk-57/packages/expo-splash-screen/CHANGELOG.md
+- expo-symbols → https://github.com/expo/expo/blob/sdk-57/packages/expo-symbols/CHANGELOG.md
+- expo-system-ui → https://github.com/expo/expo/blob/sdk-57/packages/expo-system-ui/CHANGELOG.md
+- expo-web-browser → https://github.com/expo/expo/blob/sdk-57/packages/expo-web-browser/CHANGELOG.md
+
+16 packages out of date.
+Advice:
+Use 'npx expo install --check' to review and upgrade your dependencies.
+To ignore specific packages, add them to "expo.install.exclude" in package.json. Learn more: https://expo.fyi/dependency-validation
+
+4 checks failed, indicating possible issues with the project.
+exit code: 1
+
+=== 5. npm test ===
+skipped: package.json has no "test" script (scripts: start, reset-project, android, ios, web, lint)
+
+==================================================================
+=== FINAL RE-RUN after fixes (2026-10-13T23:50:02+02:00), HEAD efbd590 ===
+
+=== npx tsc --noEmit ===
+exit code: 0
+
+=== npm run lint ===
+
+> scaffold@1.0.0 lint
+> expo lint
+
+env: load .env.local
+env: export EXPO_PUBLIC_APP_SECRET EXPO_PUBLIC_PLANNER_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+exit code: 0
+
+=== npx expo-doctor ===
+env: load .env.local
+env: export EXPO_PUBLIC_APP_SECRET EXPO_PUBLIC_PLANNER_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+Running 21 checks on your project...
+17/21 checks passed. 4 checks failed. Possible issues detected:
+Use the --verbose flag to see more details about passed checks.
+
+✖ Check for legacy global CLI installed locally
+EAS CLI should not be installed in your project. Instead, install it globally or use "npx", "pnpx", or "bunx" depending on your preferred package manager.
+Advice:
+Remove eas-cli from your project dependencies.
+
+✖ Check that required peer dependencies are installed
+Missing peer dependency: expo-asset
+Required by: expo-audio
+Advice:
+Install missing required peer dependency with "npx expo install expo-asset"
+Your app may crash outside of Expo Go without this dependency. Native module peer dependencies must be installed directly.
+
+✖ Check that no duplicate dependencies are installed
+Your project contains duplicate native module dependencies, which should be de-duplicated.
+Native builds may only contain one version of any given native module, and having multiple versions of a single Native module installed may lead to unexpected build errors.
+Found duplicates for expo-constants:
+  ├─ expo-constants@57.0.17 (at: node_modules\expo-constants)
+  ├─ expo-constants@57.0.21 (at: node_modules\expo-auth-session\node_modules\expo-constants)
+  └─ expo-constants@57.0.21 (at: node_modules\expo-linking\node_modules\expo-constants)
+Found duplicates for expo-web-browser:
+  ├─ expo-web-browser@57.0.2 (at: node_modules\expo-web-browser)
+  └─ expo-web-browser@57.0.3 (at: node_modules\expo-auth-session\node_modules\expo-web-browser)
+Advice:
+Resolve your dependency issues and deduplicate your dependencies. Learn more: https://expo.fyi/resolving-dependency-issues
+
+✖ Check that packages match versions required by installed Expo SDK
+
+🔧 Patch version mismatches
+package               expected  found    
+@expo/ui              ~57.0.23  57.0.17  
+expo                  ~57.0.28  57.0.21  
+expo-auth-session     ~57.0.15  57.0.14  
+expo-constants        ~57.0.21  57.0.17  
+expo-crypto           ~57.0.4   57.0.3   
+expo-device           ~57.0.2   57.0.1   
+expo-font             ~57.0.4   57.0.3   
+expo-glass-effect     ~57.0.4   57.0.2   
+expo-haptics          ~57.0.3   57.0.2   
+expo-image            ~57.0.5   57.0.4   
+expo-linear-gradient  ~57.0.2   57.0.1   
+expo-router           ~57.0.26  57.0.20  
+expo-splash-screen    ~57.0.10  57.0.8   
+expo-symbols          ~57.0.3   57.0.2   
+expo-system-ui        ~57.0.4   57.0.3   
+expo-web-browser      ~57.0.3   57.0.2   
+
+Changelogs:
+- expo-auth-session → https://github.com/expo/expo/blob/sdk-57/packages/expo-auth-session/CHANGELOG.md
+- expo-constants → https://github.com/expo/expo/blob/sdk-57/packages/expo-constants/CHANGELOG.md
+- expo-crypto → https://github.com/expo/expo/blob/sdk-57/packages/expo-crypto/CHANGELOG.md
+- expo-device → https://github.com/expo/expo/blob/sdk-57/packages/expo-device/CHANGELOG.md
+- expo-font → https://github.com/expo/expo/blob/sdk-57/packages/expo-font/CHANGELOG.md
+- expo-glass-effect → https://github.com/expo/expo/blob/sdk-57/packages/expo-glass-effect/CHANGELOG.md
+- expo-haptics → https://github.com/expo/expo/blob/sdk-57/packages/expo-haptics/CHANGELOG.md
+- expo-image → https://github.com/expo/expo/blob/sdk-57/packages/expo-image/CHANGELOG.md
+- expo-linear-gradient → https://github.com/expo/expo/blob/sdk-57/packages/expo-linear-gradient/CHANGELOG.md
+- expo-router → https://github.com/expo/expo/blob/sdk-57/packages/expo-router/CHANGELOG.md
+- expo-splash-screen → https://github.com/expo/expo/blob/sdk-57/packages/expo-splash-screen/CHANGELOG.md
+- expo-symbols → https://github.com/expo/expo/blob/sdk-57/packages/expo-symbols/CHANGELOG.md
+- expo-system-ui → https://github.com/expo/expo/blob/sdk-57/packages/expo-system-ui/CHANGELOG.md
+- expo-web-browser → https://github.com/expo/expo/blob/sdk-57/packages/expo-web-browser/CHANGELOG.md
+
+16 packages out of date.
+Advice:
+Use 'npx expo install --check' to review and upgrade your dependencies.
+To ignore specific packages, add them to "expo.install.exclude" in package.json. Learn more: https://expo.fyi/dependency-validation
+
+4 checks failed, indicating possible issues with the project.
+exit code: 1
+
+=== npm test ===
+skipped: no "test" script in package.json
+
+=== local Node suites (scratch/, not committed — gitignored) ===
+scratch/agents-check.ts: ALL PASS
+scratch/catalog-check.ts: achievements tracking unknown quests: []
+scratch/cloud-check.ts: ALL PASS
+scratch/steward-check.ts: ALL PASS
+scratch/sync-check.ts: ALL PASS
+scratch/timeline-check.ts: ALL PASS
+
+=== tsc + lint again after the last fix, HEAD 10df1e7 ===
+tsc exit code: 0
+
+> scaffold@1.0.0 lint
+> expo lint
+
+env: load .env.local
+env: export EXPO_PUBLIC_APP_SECRET EXPO_PUBLIC_PLANNER_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+lint exit code: 0
