@@ -106,7 +106,7 @@ export default function OnboardingScreen() {
             <Stepper
               kicker="First — who are you?"
               title="THE SYSTEM NEEDS A NAME"
-              blurb="This is what the System calls you. Nothing leaves your device.">
+              blurb="This is what the System calls you. It stays on this device unless you sign in to sync.">
               <TextInput
                 value={name}
                 onChangeText={setName}
