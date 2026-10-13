@@ -237,9 +237,12 @@ function Toggle({
   onChange: (next: boolean) => void;
 }) {
   return (
+    // Role "button", not "switch": gesture-handler's Pressable only receives
+    // clicks on web when it renders as a real <button>. The on/off state is
+    // still announced through accessibilityState.
     <Pressable
       onPress={() => onChange(!value)}
-      accessibilityRole="switch"
+      accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}>
       <View style={styles.toggleRow}>
@@ -400,7 +403,7 @@ function TimeChips({ value, onChange }: { value: string; onChange: (next: string
           <Pressable
             key={t}
             onPress={() => onChange(t)}
-            accessibilityRole="radio"
+            accessibilityRole="button"
             accessibilityLabel={`Briefing at ${t}`}
             accessibilityState={{ selected: on }}>
             <Animated.View
