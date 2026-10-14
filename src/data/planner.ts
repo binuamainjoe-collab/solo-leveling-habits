@@ -345,6 +345,8 @@ export async function sendPlannerMessage(
           ? data.suggestions
               .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
               .map((s) => s.trim().slice(0, 60))
+              // Chips are keyed by their text, so a repeated one must not get through.
+              .filter((s, i, all) => all.indexOf(s) === i)
               .slice(0, 4)
           : [],
         wantsFinalize: data.wants_finalize === true,

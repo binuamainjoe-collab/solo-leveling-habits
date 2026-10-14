@@ -259,8 +259,11 @@ export function normaliseDraft(raw: unknown, dailyQuests: DailyQuestRef[]): Norm
     const focus =
       quest && said && said.toLowerCase() !== quest.title.toLowerCase() ? said : undefined;
 
+    // A kept id must stay unique: the model can echo one id onto two blocks
+    // (splitting a block in two), and a task's quest id is derived from it.
+    const keptId = typeof b.id === 'string' && b.id.startsWith('blk:') ? b.id : '';
     blocks.push({
-      id: typeof b.id === 'string' && b.id.startsWith('blk:') ? b.id : newBlockId(),
+      id: keptId && !blocks.some((x) => x.id === keptId) ? keptId : newBlockId(),
       kind,
       // A habit keeps its quest's own name, so the timeline and the board
       // never disagree about what it is called; the specifics live in focus.

@@ -17,6 +17,8 @@ import { feedback, playSound } from '@/lib/feedback';
 import { artFor } from '@/data/cardArt';
 import type { QuestDef } from '@/data/quests';
 import { windowState } from '@/data/completion';
+import { isPlannedId } from '@/data/planner';
+import { PLANNED_XP_MULTIPLIER } from '@/store/progress';
 
 interface Props {
   quest: QuestDef;
@@ -47,6 +49,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
   const over = ceiling && value > quest.target;
 
   const bar = done ? palette.positive : over ? palette.negative : palette.accent;
+  // Shown as paid: the store gives planned tasks the planning bonus.
+  const reward = isPlannedId(quest.id) ? Math.round(quest.xp * PLANNED_XP_MULTIPLIER) : quest.xp;
 
   /* --- completion burst: one-shot, fired when `done` flips to true --------- */
   const burst = useSharedValue(0);
@@ -103,7 +107,7 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
           </SystemText>
         </View>
         <SystemText variant="label" color={done ? palette.positive : palette.accent} style={styles.xp}>
-          +{quest.xp}
+          +{reward}
         </SystemText>
       </View>
 
@@ -193,7 +197,7 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
 
       <Animated.View pointerEvents="none" style={[styles.xpFloat, xpFloatStyle]}>
         <SystemText variant="title" color={palette.accent} glow style={styles.xpFloatText}>
-          +{quest.xp} XP
+          +{reward} XP
         </SystemText>
       </Animated.View>
     </Card>

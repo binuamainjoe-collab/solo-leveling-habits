@@ -730,8 +730,13 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             ),
           );
         }),
+      // Unlocks are checked here too: XP from outside the board can cross a
+      // level or rank line, and its trophy and card must not wait for the
+      // next quest tap to appear.
       addXp: (amount) =>
-        setState((s) => (amount === 0 ? s : { ...s, xp: Math.max(0, s.xp + amount) })),
+        setState((s) =>
+          amount === 0 ? s : applyCards(applyUnlocks({ ...s, xp: Math.max(0, s.xp + amount) })),
+        ),
       setProgress: applyValue,
       addProgress: (id, amount) => applyValue(id, (state.values[id] ?? 0) + amount),
       clearQuest: (id) => applyValue(id, 0),

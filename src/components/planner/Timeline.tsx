@@ -207,7 +207,7 @@ function Row({
           // One flat pressable around the card; nothing inside it presses.
           <Pressable
             onPress={() => live.onToggleTask(block)}
-            accessibilityRole="checkbox"
+            accessibilityRole="button"
             accessibilityLabel={block.title}
             accessibilityState={{ checked: done }}>
             {body}

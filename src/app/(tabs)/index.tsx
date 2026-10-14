@@ -215,7 +215,7 @@ function PageSwitcher({
   onChange: (next: Page) => void;
 }) {
   return (
-    <View style={styles.switcher} accessibilityRole="tablist">
+    <View style={styles.switcher}>
       <SwitchPill
         label="To do"
         count={todoCount}
@@ -266,7 +266,7 @@ function SwitchPill({
     <Pressable
       onPress={onPress}
       style={styles.pillWrap}
-      accessibilityRole="tab"
+      accessibilityRole="button"
       accessibilityLabel={`${label}, ${count}`}
       accessibilityState={{ selected }}>
       <Animated.View

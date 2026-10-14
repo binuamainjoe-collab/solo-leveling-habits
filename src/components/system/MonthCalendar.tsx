@@ -5,6 +5,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, categoryMeta, palette, radius, space } from '@/constants/theme';
+import { plannedToQuest } from '@/data/planner';
 import { QUESTS_BY_ID } from '@/data/quests';
 import { isComplete } from '@/data/completion';
 import { todayKey, useDayLog, useProgress } from '@/store/progress';
@@ -52,10 +53,15 @@ export function MonthCalendar() {
   const detail = selected ? log[selected] : undefined;
   const detailQuests = useMemo(() => {
     if (!detail) return [];
+    // Planned tasks are not in the catalogue; without this a day's planner
+    // tasks counted toward "cleared" but never appeared in its list.
     return Object.entries(detail.values)
-      .map(([id, v]) => ({ quest: QUESTS_BY_ID[id], value: v }))
+      .map(([id, v]) => ({
+        quest: QUESTS_BY_ID[id] ?? (state.planned[id] ? plannedToQuest(state.planned[id]) : undefined),
+        value: v,
+      }))
       .filter((x) => x.quest && isComplete(x.quest, x.value));
-  }, [detail]);
+  }, [detail, state.planned]);
 
   return (
     <View>

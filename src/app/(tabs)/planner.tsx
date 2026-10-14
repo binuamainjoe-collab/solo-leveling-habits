@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -68,15 +68,19 @@ export default function PlannerScreen() {
   }, []);
 
   const [session, setSession] = useState<PlannerSession | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void loadSession().then((s) => {
-      if (alive) setSession(s);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [date]);
+  // On focus, not mount: this tab stays mounted under the chat, and coming
+  // back from a half-finished conversation should offer to resume it.
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      void loadSession().then((s) => {
+        if (alive) setSession(s);
+      });
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
 
   const stored = state.plans[date];
   const plan: DraftPlan | null = stored?.timeline

@@ -1,8 +1,8 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { Card } from '@/components/system/Card';
 import { Screen } from '@/components/system/Screen';
@@ -21,7 +21,7 @@ import {
 } from '@/constants/theme';
 import { ACHIEVEMENTS } from '@/data/achievements';
 import { plannerConfigured } from '@/data/planner';
-import { listAccounts, signOut, type Account } from '@/lib/auth';
+import { currentSession, listAccounts, signOut, type Account } from '@/lib/auth';
 import { supabaseConfigured } from '@/lib/supabase';
 import { QUESTS } from '@/data/quests';
 import { playSound } from '@/lib/feedback';
@@ -237,9 +237,12 @@ function Toggle({
   onChange: (next: boolean) => void;
 }) {
   return (
+    // Role "button", not "switch": gesture-handler's Pressable only receives
+    // clicks on web when it renders as a real <button>. The on/off state is
+    // still announced through accessibilityState.
     <Pressable
       onPress={() => onChange(!value)}
-      accessibilityRole="switch"
+      accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}>
       <View style={styles.toggleRow}>
@@ -305,12 +308,27 @@ function Record({
  */
 function AccountBlock() {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  useEffect(() => {
-    void listAccounts().then(setAccounts);
-  }, []);
+  // Re-read on every visit (this tab stays mounted under the sign-in screen),
+  // and take "signed in" from the live session: sign-out keeps the registry.
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      void Promise.all([listAccounts(), currentSession().catch(() => null)]).then(
+        ([list, session]) => {
+          if (!alive) return;
+          setAccounts(list);
+          setSessionId(session?.user?.id ?? null);
+        },
+      );
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
 
-  const active = accounts[0];
+  const active = accounts.find((a) => a.id === sessionId);
 
   if (!supabaseConfigured()) {
     return (
@@ -385,7 +403,7 @@ function TimeChips({ value, onChange }: { value: string; onChange: (next: string
           <Pressable
             key={t}
             onPress={() => onChange(t)}
-            accessibilityRole="radio"
+            accessibilityRole="button"
             accessibilityLabel={`Briefing at ${t}`}
             accessibilityState={{ selected: on }}>
             <Animated.View

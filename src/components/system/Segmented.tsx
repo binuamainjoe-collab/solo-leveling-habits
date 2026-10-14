@@ -32,7 +32,7 @@ export function Segmented<K extends string>({
   tint?: string;
 }) {
   return (
-    <View style={styles.row} accessibilityRole="tablist">
+    <View style={styles.row}>
       {segments.map((s) => {
         const selected = s.key === value;
         return (
@@ -44,7 +44,7 @@ export function Segmented<K extends string>({
               playSound('tap');
               onChange(s.key);
             }}
-            accessibilityRole="tab"
+            accessibilityRole="button"
             accessibilityLabel={s.count !== undefined ? `${s.label}, ${s.count}` : s.label}
             accessibilityState={{ selected }}>
             <Animated.View

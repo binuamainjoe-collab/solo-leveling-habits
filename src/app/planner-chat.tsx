@@ -128,6 +128,13 @@ export default function PlannerChatScreen() {
     void saveSession(session);
   }, [loaded, sealed, date, messages, suggestions, draft]);
 
+  // Cleared once sealed, from an effect: clearing inside seal() could be
+  // overtaken by the save above from the render before, which brought the
+  // finished conversation back on the phone.
+  useEffect(() => {
+    if (sealed) void clearSession();
+  }, [sealed]);
+
   // Keep the newest line in view when the keyboard opens.
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
@@ -238,7 +245,6 @@ export default function PlannerChatScreen() {
     const first = state.plans[date] === undefined;
     finalizePlan(date, plan);
     feedback('complete', 'success');
-    await clearSession();
     setSuggestions([]);
     setSealed({ xp: first ? ACCEPT_PLAN_XP : 0 });
   }
