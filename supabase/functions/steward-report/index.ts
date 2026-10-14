@@ -78,7 +78,7 @@ async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
       .select('agent, status, error, duration_ms, tokens_in, tokens_out, tokens_thoughts')
       .gte('started_at', since),
     db.from('usage').select('calls').eq('day', date).maybeSingle(),
-    db.from('goals').select('title').eq('active', true).maybeSingle(),
+    db.from('goals').select('title').eq('focus', true).maybeSingle(),
     db
       .from('findings')
       .select('title, rank, score, verdict, minutes_to_consume, url, created_at')

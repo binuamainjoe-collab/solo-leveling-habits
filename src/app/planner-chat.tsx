@@ -19,6 +19,7 @@ import { alpha, font, palette, radius, space } from '@/constants/theme';
 import {
   isResumable,
   isStale,
+  openLoops,
   openingLine,
   sendPlannerMessage,
   type ChatMessage,
@@ -156,6 +157,7 @@ export default function PlannerChatScreen() {
       goals: state.profile?.goals ?? [],
       studyMethods: state.profile?.studyMethods ?? [],
       dailyQuests,
+      openLoops: date === today ? [] : openLoops(state.plans[today]?.timeline?.blocks, state.values),
       draft: current,
     };
   }

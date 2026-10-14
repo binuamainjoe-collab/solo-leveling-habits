@@ -168,6 +168,18 @@ export function taskIdForBlock(block: PlanBlock): string {
   return `${PLANNED_PREFIX}${block.id.replace(/^blk:/, '')}`;
 }
 
+/**
+ * The planned tasks of a day that are not ticked yet — the open loops the
+ * System holds so the student does not have to. Planned tasks are one-tap
+ * quests, so any value of 1 or more is done.
+ */
+export function openLoops(blocks: PlanBlock[] | undefined, values: Record<string, number>): string[] {
+  return (blocks ?? [])
+    .filter((b) => b.kind === 'task' && (values[taskIdForBlock(b)] ?? 0) < 1)
+    .map((b) => b.title)
+    .slice(0, 10);
+}
+
 /* --------------------------------------------------------- conversation */
 
 export interface ChatMessage {
@@ -189,6 +201,12 @@ export interface PlannerContext {
   goals: string[];
   studyMethods: string[];
   dailyQuests: DailyQuestRef[];
+  /**
+   * Tasks from today's plan still unticked, when planning another day. The
+   * System offers to carry them over rather than the student having to
+   * remember them.
+   */
+  openLoops?: string[];
   /** The draft as it currently stands, so every turn edits the same plan. */
   draft: DraftPlan | null;
 }

@@ -255,9 +255,17 @@ export function normaliseDraft(raw: unknown, dailyQuests: DailyQuestRef[]): Norm
     // The model's own words for a habit, kept when they say more than the
     // quest's name does. Read from `focus` when the model echoes a block
     // back, otherwise from the title it gave.
-    const said = typeof b.focus === 'string' && b.focus.trim() ? b.focus.trim().slice(0, 120) : title;
-    const focus =
-      quest && said && said.toLowerCase() !== quest.title.toLowerCase() ? said : undefined;
+    const given = typeof b.focus === 'string' && b.focus.trim() ? b.focus.trim().slice(0, 120) : '';
+    const said = given || title;
+    // A task keeps an explicit focus too — "For: Pass the stats exam" — which
+    // is how a task shows the goal it serves. Fixed blocks and breaks never do.
+    const focus = quest
+      ? said && said.toLowerCase() !== quest.title.toLowerCase()
+        ? said
+        : undefined
+      : kind === 'task' && given && given.toLowerCase() !== title.toLowerCase()
+        ? given
+        : undefined;
 
     // A kept id must stay unique: the model can echo one id onto two blocks
     // (splitting a block in two), and a task's quest id is derived from it.

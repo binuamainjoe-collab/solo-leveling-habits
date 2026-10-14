@@ -108,14 +108,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { data: goal, error: goalError } = await db
     .from('goals')
     .select('id, title')
-    .eq('active', true)
+    .eq('focus', true)
     .maybeSingle();
 
   if (goalError) {
     console.error('goal read failed', goalError.message);
     return fail('The System could not read your goal.', 500);
   }
-  if (!goal) return fail('Set a goal before sending Beru out.', 409);
+  if (!goal) return fail('Set a focus goal before sending Beru out.', 409);
 
   const claim = await claimCalls(db, CALL_COST);
   if (!claim.ok) return claim.response;

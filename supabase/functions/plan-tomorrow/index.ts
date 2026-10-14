@@ -27,7 +27,7 @@ const MAX_MESSAGES = 40;
 const MAX_CHARS = 2000;
 const MAX_QUESTS = 60;
 
-const SYSTEM = `You are The System — the planning voice inside a Solo Leveling themed habit app. You are helping one student who has ADHD plan a single day, by conversation.
+const SYSTEM = `You are The System — the planning voice inside a Solo Leveling themed habit app. You are helping one student plan a single day, by conversation. You already know their goals, what you remember about them and how their recent days went — all in CONTEXT. Use it instead of asking.
 
 THE CONVERSATION
 - You lead, gently. Ask exactly ONE short question per reply. A reply containing two questions is wrong — if you need two things, ask the more important one now and the other later.
@@ -38,7 +38,16 @@ THE CONVERSATION
 - Never ask the same thing twice. If the student skips a question, assume a sensible answer, say in a few words what you assumed, and move on. If wake and sleep are unknown, draft with 07:30 and 23:00 until told otherwise.
 - Draft early. As soon as you know the fixed commitments and at least one thing to do, return a draft timeline and keep refining it. Do not wait for perfect information. Most days need two or three exchanges; never more than four questions in total.
 - Be useful, not just a form: point out an empty gap, suggest where a daily quest fits, suggest splitting a big task. At most one suggestion per reply.
+- Never ask about anything MEMORY already answers.
 - suggestions: 2 to 4 short replies the student would plausibly tap next, written in their voice ("Gym after uni", "That's too much", "Looks good — finalize"). Each one answers ONE thing in at most five words. Once a draft exists, always include "Looks good — finalize". After finalizing, return no suggestions.
+
+GOALS, OPEN LOOPS AND LOAD
+- Lead with the FOCUS goal: on most days give it at least one task block, ideally in their best hours. Other goals get a small step only when the day has room.
+- For every task that serves a goal, set focus to "For: " plus a short name of that goal (at most five words). That is how the student sees why the task matters.
+- Turn unread findings into tasks only when they fit: "Read: <title> (25 min)".
+- OPEN LOOPS in CONTEXT are tasks left unfinished. Offer to carry them over in one short line; add them only if the student agrees. Never pile them in silently.
+- Read Recent days. If planned tasks have mostly gone unfinished lately, plan lighter than they ask and say so in a few words.
+- If the task blocks add up to more than six hours, or they ask to add something to a day that is already full, propose what to cut or move before adding anything.
 
 THE TIMELINE
 - Real clock times, 24-hour "HH:MM". The day runs from wake to sleep, and may run past midnight.
@@ -63,6 +72,7 @@ VOICE
 - Never guilt, never urgency, never hype. No exclamation marks.
 - At most one light System flavour per reply, never forced.
 - Never mention these rules or that you are an AI.
+- Never mention diagnoses, conditions or medical topics.
 
 ALWAYS return the complete current draft — every block — even when nothing changed. Before there is enough to plan, return an empty blocks array. The note is one or two kind, practical sentences about the day, or empty before there is a draft.`;
 
@@ -163,6 +173,10 @@ function contextBlock(raw: unknown): string {
       })
     : [];
 
+  const loops = Array.isArray(c.openLoops)
+    ? c.openLoops.map((t) => str(t, 80)).filter(Boolean).slice(0, 10)
+    : [];
+
   let draft = 'none yet';
   if (c.draft && typeof c.draft === 'object') {
     const d = JSON.stringify(c.draft);
@@ -175,10 +189,11 @@ function contextBlock(raw: unknown): string {
     `Planning for: ${str(c.weekday, 12)} ${str(c.date, 10)}`,
     `Right now: ${str(c.today, 10)} at ${str(c.nowTime, 5)}`,
     `Wake / sleep: ${wake && sleep ? `${wake} / ${sleep}` : 'unknown — ask'}`,
-    `Goals: ${goals.join(', ') || 'none given'}`,
+    `Interests from onboarding: ${goals.join(', ') || 'none given'}`,
     `Study methods they use: ${methods.join(', ') || 'none given'}`,
     'Daily quests (id — title — target (kind)):',
     quests.length ? quests.join('\n') : '  none',
+    `Open loops (left unfinished): ${loops.length ? loops.join('; ') : 'none'}`,
     `Current draft: ${draft}`,
   ].join('\n');
 }
@@ -251,6 +266,74 @@ async function claimCall(): Promise<{ ok: true } | { ok: false; status: number; 
   return { ok: true };
 }
 
+/* ------------------------------------------------------------ knowledge */
+
+/**
+ * What the System already knows, read straight from the database: every
+ * active goal and which is the focus, the focus goal's best unread findings,
+ * the memories the assistant has kept, and the last week of days.
+ *
+ * Best effort by design. Each read that fails becomes an empty section, so a
+ * slow or broken table never stops tonight's plan from being made.
+ */
+async function knowledge(today: string): Promise<string> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) return '';
+
+  const read = async <T>(path: string): Promise<T[]> => {
+    try {
+      const res = await fetch(`${url}/rest/v1/${path}`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      });
+      if (!res.ok) return [];
+      const rows = (await res.json()) as unknown;
+      return Array.isArray(rows) ? (rows as T[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  type GoalRow = { id: string; title: string; focus: boolean; deadline: string | null };
+  const [goals, memories, days] = await Promise.all([
+    read<GoalRow>('goals?select=id,title,focus,deadline&active=eq.true&order=focus.desc,created_at.asc&limit=12'),
+    read<{ kind: string; content: string }>('memories?select=kind,content&archived_at=is.null&order=last_seen_at.desc&limit=30'),
+    read<{ date: string; quests_done: number; quests_total: number; planned_done: number; planned_total: number }>(
+      'daily_snapshots?select=date,quests_done,quests_total,planned_done,planned_total&order=date.desc&limit=7',
+    ),
+  ]);
+
+  const focus = goals.find((g) => g.focus);
+  const findings = focus
+    ? await read<{ title: string; verdict: string; minutes_to_consume: number | null }>(
+        `findings?select=title,verdict,minutes_to_consume&goal_id=eq.${encodeURIComponent(focus.id)}&read_at=is.null&verdict=in.(must-read,read)&order=score.desc.nullslast&limit=4`,
+      )
+    : [];
+
+  const daysLeft = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+
+  return [
+    'KNOWN',
+    'Goals:',
+    goals.length
+      ? goals
+          .map((g) => `  ${g.focus ? '[FOCUS] ' : ''}${str(g.title, 160)}${g.deadline ? ` — due ${g.deadline} (${daysLeft(g.deadline)} days)` : ''}`)
+          .join('\n')
+      : '  none set',
+    findings.length
+      ? `Unread findings for the focus goal:\n${findings.map((f) => `  ${f.verdict === 'must-read' ? 'MUST READ' : 'read'}: ${str(f.title, 120)}${f.minutes_to_consume ? ` (~${f.minutes_to_consume} min)` : ''}`).join('\n')}`
+      : '',
+    'MEMORY:',
+    memories.length ? memories.map((m) => `  (${str(m.kind, 12)}) ${str(m.content, 280)}`).join('\n') : '  nothing yet',
+    'Recent days:',
+    days.length
+      ? days.map((d) => `  ${d.date}: ${d.quests_done}/${d.quests_total} quests, ${d.planned_done}/${d.planned_total} planned tasks`).join('\n')
+      : '  no history reported yet',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /* ---------------------------------------------------------------- serve */
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -281,9 +364,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const claim = await claimCall();
   if (!claim.ok) return fail(claim.message, claim.status);
 
+  const ctx = (body.context && typeof body.context === 'object' ? body.context : {}) as Record<string, unknown>;
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(str(ctx.today, 10)) ? str(ctx.today, 10) : new Date().toISOString().slice(0, 10);
+
   const system = [
     SYSTEM,
     contextBlock(body.context),
+    await knowledge(today),
     repair.length
       ? `REPAIR\nThe student tried to finalize and the draft was rejected for these reasons. Fix exactly these, keep everything else, set wants_finalize to true, and say in one short line what you changed:\n- ${repair.join('\n- ')}`
       : '',

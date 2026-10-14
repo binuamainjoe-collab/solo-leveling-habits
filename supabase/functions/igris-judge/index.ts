@@ -101,14 +101,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { data: goal, error: goalError } = await db
     .from('goals')
     .select('id, title')
-    .eq('active', true)
+    .eq('focus', true)
     .maybeSingle();
 
   if (goalError) {
     console.error('goal read failed', goalError.message);
     return fail('The System could not read your goal.', 500);
   }
-  if (!goal) return fail('There is no active goal to judge against.', 409);
+  if (!goal) return fail('There is no focus goal to judge against.', 409);
 
   const { data: pending, error: pendingError } = await db
     .from('findings')
