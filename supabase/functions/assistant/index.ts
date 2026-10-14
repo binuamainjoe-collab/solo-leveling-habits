@@ -247,7 +247,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const now = nowBlock(body.now);
 
   // Everything the System knows, gathered in one pass.
-  const [goalsRes, memRes, snapRes, historyRes] = await Promise.all([
+  const [goalsRes, memRes, forgottenRes, snapRes, historyRes] = await Promise.all([
     db
       .from('goals')
       .select('id, title, focus, deadline')
@@ -259,6 +259,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .select('id, kind, content')
       .is('archived_at', null)
       .order('last_seen_at', { ascending: false })
+      .limit(MAX_MEMORIES_IN),
+    // What the Player told the System to forget. Shown to the model so it is
+    // not re-learned from an old message in the conversation.
+    db
+      .from('memories')
+      .select('content')
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false })
       .limit(MAX_MEMORIES_IN),
     db
       .from('daily_snapshots')
@@ -302,6 +310,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const memories = memRes.data ?? [];
   const memoryLines = memories.map((m) => `  (${m.kind}) ${str(m.content, 280)}`);
+  const forgotten = (forgottenRes.data ?? []).map((m) => str(m.content, 280));
 
   const snapLines = (snapRes.data ?? []).map(
     (s) =>
@@ -323,6 +332,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     '',
     'MEMORY (what you already know):',
     memoryLines.length ? memoryLines.join('\n') : '  nothing yet',
+    forgotten.length
+      ? `FORGOTTEN (the Player asked you to forget these; never remember them, or anything saying the same thing, again):\n${forgotten.map((f) => `  ${f}`).join('\n')}`
+      : '',
     '',
     'Recent days:',
     snapLines.length ? snapLines.join('\n') : '  no history reported yet',
@@ -366,7 +378,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     : [];
   const action: Action = ACTIONS.includes(out?.action as Action) ? (out!.action as Action) : 'none';
 
-  const known = new Set(memories.map((m) => str(m.content, 280).toLowerCase()));
+  const known = new Set([...memories.map((m) => str(m.content, 280)), ...forgotten].map((c) => c.toLowerCase()));
   const toRemember = vetMemories(out?.remember, known);
 
   // The exchange is stored only once it succeeded, so a failed turn leaves

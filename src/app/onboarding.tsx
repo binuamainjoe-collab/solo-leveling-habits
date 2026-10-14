@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
+import { ScrollView } from 'react-native-gesture-handler';
+
+import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInRight } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';

@@ -59,6 +59,13 @@ export interface Settings {
    */
   wake?: string;
   sleep?: string;
+  /**
+   * The phone reminders, each on unless switched off. Optional so saves from
+   * before reminders existed read as "on", which is what the student chose.
+   */
+  remindMorning?: boolean;
+  remindPlanning?: boolean;
+  remindDrift?: boolean;
 }
 
 /** An accepted plan, stored against the day it is FOR. */

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useCallback, useState } from 'react';
@@ -168,6 +168,37 @@ export default function HunterScreen() {
               hint="A quiet looping track. Pauses when you leave the app."
               value={state.settings?.music ?? true}
               onChange={(v) => setSetting('music', v)}
+            />
+          </Card>
+
+          <SystemText variant="label" style={styles.sectionLabel}>
+            Reminders
+          </SystemText>
+          <Card style={styles.block}>
+            {Platform.OS === 'web' ? (
+              <SystemText variant="meta" style={styles.notConnected}>
+                Reminders arrive on the phone app. The browser cannot schedule them.
+              </SystemText>
+            ) : null}
+            <Toggle
+              label="Morning briefing"
+              hint="At your wake time: what is first today."
+              value={state.settings?.remindMorning ?? true}
+              onChange={(v) => setSetting('remindMorning', v)}
+            />
+            <View style={styles.toggleDivider} />
+            <Toggle
+              label="Planning time"
+              hint={`At ${state.settings?.briefingTime ?? '21:30'}, when tomorrow has no plan yet.`}
+              value={state.settings?.remindPlanning ?? true}
+              onChange={(v) => setSetting('remindPlanning', v)}
+            />
+            <View style={styles.toggleDivider} />
+            <Toggle
+              label="Open tasks"
+              hint="When a planned task's time has passed and it is still open. Never after bedtime."
+              value={state.settings?.remindDrift ?? true}
+              onChange={(v) => setSetting('remindDrift', v)}
             />
           </Card>
 

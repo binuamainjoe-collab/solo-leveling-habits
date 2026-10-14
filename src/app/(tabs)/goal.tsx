@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, TextInput, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
+import { ScrollView } from 'react-native-gesture-handler';
+
+import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
@@ -21,11 +23,23 @@ import {
   type Verdict,
 } from '@/data/agents';
 import { artFor } from '@/data/cardArt';
-import { validateGoalTitle } from '@/data/goals';
+import {
+  deadlineLabel,
+  MAX_ACTIVE_GOALS,
+  MEMORY_KIND_LABEL,
+  orderGoals,
+  validateDeadline,
+  validateGoalTitle,
+  type Goal,
+  type Memory,
+} from '@/data/goals';
 import { feedback, playSound } from '@/lib/feedback';
 import {
+  archiveGoal,
   fetchGoalState,
   fetchLatestReport,
+  focusGoal,
+  forgetMemory,
   markFindingRead,
   runScout,
   runSteward,
@@ -51,7 +65,8 @@ const VERDICT_META: Record<Verdict, { label: string; color: string }> = {
  * something you finish, and mixing them makes both harder to see.
  */
 export default function GoalScreen() {
-  const { addXp } = useProgress();
+  const { addXp, state: progress } = useProgress();
+  const today = progress.date;
 
   // Reading the env vars is a constant for the life of the process, so it can
   // seed the initial state. That matters: it means the "nothing to load" case
@@ -65,6 +80,12 @@ export default function GoalScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [deadlineDraft, setDeadlineDraft] = useState('');
+  // Adding a goal when one already exists is a deliberate step, not a
+  // standing input — the screen is about the focus, not about collecting goals.
+  const [adding, setAdding] = useState(false);
+  // Archiving takes two taps: the first arms it, the second does it.
+  const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
 
   // The Steward's reading, and whether its panel is open over the screen.
   const [report, setReport] = useState<Report | null>(null);
@@ -115,19 +136,74 @@ export default function GoalScreen() {
       setError(check.error);
       return;
     }
+    const due = validateDeadline(deadlineDraft, today);
+    if (!due.ok) {
+      setError(due.error);
+      return;
+    }
     playSound('tap');
     setBusy('goal');
     setError(null);
 
-    const res = await saveGoal(check.title);
+    const res = await saveGoal(check.title, due.deadline);
     if (res.ok) {
       feedback('complete', 'success');
       setDraft('');
+      setDeadlineDraft('');
+      setAdding(false);
       await load();
     } else {
       setError(res.error ?? 'The System could not set that goal.');
     }
     setBusy(null);
+  }
+
+  async function makeFocus(target: Goal) {
+    playSound('tap');
+    setBusy(`focus:${target.id}`);
+    setError(null);
+    setConfirmArchive(null);
+    const res = await focusGoal(target.id);
+    if (res.ok) {
+      feedback('complete', 'success');
+      setNotice(`Focus moved to "${target.title}". The shadows and the planner follow it now.`);
+      await load();
+    } else {
+      setError(res.error ?? 'The System could not change your focus.');
+    }
+    setBusy(null);
+  }
+
+  async function archive(target: Goal) {
+    if (confirmArchive !== target.id) {
+      playSound('tap');
+      setConfirmArchive(target.id);
+      return;
+    }
+    playSound('tap');
+    setBusy(`archive:${target.id}`);
+    setError(null);
+    setConfirmArchive(null);
+    const res = await archiveGoal(target.id);
+    if (res.ok) {
+      setNotice(`"${target.title}" archived. Its findings are kept.`);
+      await load();
+    } else {
+      setError(res.error ?? 'The System could not archive that goal.');
+    }
+    setBusy(null);
+  }
+
+  async function forget(memory: Memory) {
+    playSound('tap');
+    // Optimistic, like ticking a finding: it disappears at once, and comes
+    // back with an error if the server refused.
+    setState((s) => (s ? { ...s, memories: s.memories.filter((m) => m.id !== memory.id) } : s));
+    const res = await forgetMemory(memory.id);
+    if (!res.ok) {
+      setError(res.error ?? 'The System could not forget that.');
+      await load();
+    }
   }
 
   async function summon(agent: AgentDef) {
@@ -211,6 +287,8 @@ export default function GoalScreen() {
   }
 
   const goal = state?.goal ?? null;
+  const goals = state ? orderGoals(state.goals) : [];
+  const memories = state?.memories ?? [];
   const findings = state ? sortFindings(state.findings) : [];
   const pending = state ? unjudged(state.findings).length : 0;
   const runs = state ? latestRuns(state.runs) : {};
@@ -224,6 +302,11 @@ export default function GoalScreen() {
         <SystemText variant="hero" style={styles.title} numberOfLines={3}>
           {goal ? goal.title.toUpperCase() : 'NO GOAL SET'}
         </SystemText>
+        {goal?.deadline ? (
+          <SystemText variant="label" color={palette.gold} style={styles.deadline}>
+            ◷ {goal.deadline} · {deadlineLabel(goal.deadline, today).toUpperCase()}
+          </SystemText>
+        ) : null}
 
         {!configured ? (
           <Card tint={palette.negative} style={styles.block}>
@@ -241,12 +324,13 @@ export default function GoalScreen() {
           </View>
         ) : (
           <>
-            {/* Setting or replacing the goal */}
-            {!goal ? (
+            {/* The first goal, or another one */}
+            {!goal || adding ? (
               <Animated.View entering={FadeIn.duration(260)}>
                 <SystemText variant="body" style={styles.sub}>
-                  Name one thing you are working towards. One at a time — the System will not
-                  split its attention, and neither should you.
+                  {goal
+                    ? 'Add another goal. It joins the list without taking over — change the focus whenever you choose.'
+                    : 'Name one thing you are working towards. You can hold a few, but one is always the focus — the System plans the week around it.'}
                 </SystemText>
                 <TextInput
                   value={draft}
@@ -258,14 +342,69 @@ export default function GoalScreen() {
                   editable={busy === null}
                   accessibilityLabel="Your long-term goal"
                 />
+                <TextInput
+                  value={deadlineDraft}
+                  onChangeText={setDeadlineDraft}
+                  placeholder="Deadline, if it has one (YYYY-MM-DD)"
+                  placeholderTextColor={palette.textFaint}
+                  style={[styles.input, styles.inputShort]}
+                  editable={busy === null}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={10}
+                  accessibilityLabel="Deadline, optional, as year month day"
+                />
                 <ActionButton
-                  label="Set this goal"
+                  label={goal ? 'Add this goal' : 'Set this goal'}
                   onPress={() => void commitGoal()}
                   disabled={busy !== null || draft.trim().length === 0}
                   busy={busy === 'goal'}
                   primary
                 />
+                {goal ? (
+                  <ActionButton
+                    label="Cancel"
+                    onPress={() => {
+                      playSound('tap');
+                      setAdding(false);
+                      setDraft('');
+                      setDeadlineDraft('');
+                    }}
+                    disabled={busy !== null}
+                  />
+                ) : null}
               </Animated.View>
+            ) : null}
+
+            {/* Every goal, focus first */}
+            {goals.length > 0 ? (
+              <>
+                <SystemText variant="label" style={styles.sectionLabel}>
+                  Your goals · {goals.length}
+                </SystemText>
+                {goals.map((g) => (
+                  <GoalRow
+                    key={g.id}
+                    goal={g}
+                    today={today}
+                    busy={busy}
+                    armed={confirmArchive === g.id}
+                    onFocus={() => void makeFocus(g)}
+                    onArchive={() => void archive(g)}
+                  />
+                ))}
+                {!adding && goals.length < MAX_ACTIVE_GOALS ? (
+                  <ActionButton
+                    label="＋ Add a goal"
+                    onPress={() => {
+                      playSound('tap');
+                      setConfirmArchive(null);
+                      setAdding(true);
+                    }}
+                    disabled={busy !== null}
+                  />
+                ) : null}
+              </>
             ) : null}
 
             {/* The roster */}
@@ -339,6 +478,24 @@ export default function GoalScreen() {
                 Nothing found yet. Send Beru out.
               </SystemText>
             ) : null}
+
+            {/* What the System has learned — visible, so it can be trusted */}
+            <SystemText variant="label" style={styles.sectionLabel}>
+              What the System remembers{memories.length ? ` · ${memories.length}` : ''}
+            </SystemText>
+            {memories.length > 0 ? (
+              <Card style={styles.block} contentStyle={styles.memoryInner}>
+                {memories.map((m, i) => (
+                  <MemoryRow key={m.id} memory={m} first={i === 0} onForget={() => void forget(m)} />
+                ))}
+              </Card>
+            ) : (
+              <SystemText variant="meta" style={styles.memoryEmpty}>
+                Nothing yet. Talk to the System with the ◆ button and it will keep what matters —
+                deadlines, what works for you, what you have committed to. Anything here can be
+                forgotten.
+              </SystemText>
+            )}
           </>
         )}
       </ScrollView>
@@ -557,6 +714,113 @@ function FindingCard({
   );
 }
 
+/**
+ * One goal in the list. The focus carries the accent; the others offer to
+ * become it. Archiving is two taps — the first only arms the button.
+ */
+function GoalRow({
+  goal,
+  today,
+  busy,
+  armed,
+  onFocus,
+  onArchive,
+}: {
+  goal: Goal;
+  today: string;
+  busy: string | null;
+  armed: boolean;
+  onFocus: () => void;
+  onArchive: () => void;
+}) {
+  const disabled = busy !== null;
+  return (
+    <Card
+      raised={goal.focus}
+      tint={goal.focus ? palette.accent : undefined}
+      style={styles.goalCard}
+      contentStyle={styles.goalInner}>
+      <View style={styles.goalTop}>
+        {goal.focus ? (
+          <SystemText variant="label" color={palette.accent} style={styles.focusTag}>
+            ◆ FOCUS
+          </SystemText>
+        ) : null}
+        {goal.deadline ? (
+          <SystemText variant="label" color={palette.gold} style={styles.goalDue}>
+            {deadlineLabel(goal.deadline, today).toUpperCase()}
+          </SystemText>
+        ) : null}
+      </View>
+      <SystemText variant="title" style={styles.goalTitle} numberOfLines={3}>
+        {goal.title}
+      </SystemText>
+      <View style={styles.goalActions}>
+        {!goal.focus ? (
+          <SmallButton
+            label={busy === `focus:${goal.id}` ? 'MOVING…' : 'MAKE FOCUS'}
+            onPress={onFocus}
+            disabled={disabled}
+            accent
+          />
+        ) : null}
+        <SmallButton
+          label={busy === `archive:${goal.id}` ? 'ARCHIVING…' : armed ? 'TAP AGAIN TO ARCHIVE' : 'ARCHIVE'}
+          onPress={onArchive}
+          disabled={disabled}
+          warn={armed}
+        />
+      </View>
+    </Card>
+  );
+}
+
+function MemoryRow({ memory, first, onForget }: { memory: Memory; first: boolean; onForget: () => void }) {
+  return (
+    <View style={[styles.memoryRow, !first && styles.memoryDivider]}>
+      <View style={styles.memoryText}>
+        <SystemText variant="label" color={palette.textFaint} style={styles.memoryKind}>
+          {MEMORY_KIND_LABEL[memory.kind].toUpperCase()}
+        </SystemText>
+        <SystemText variant="body" style={styles.memoryContent}>
+          {memory.content}
+        </SystemText>
+      </View>
+      <SmallButton label="FORGET" onPress={onForget} />
+    </View>
+  );
+}
+
+function SmallButton({
+  label,
+  onPress,
+  disabled,
+  accent,
+  warn,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  accent?: boolean;
+  warn?: boolean;
+}) {
+  const tone = warn ? palette.negative : accent ? palette.accent : palette.textMuted;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label.toLowerCase()}
+      accessibilityState={{ disabled: Boolean(disabled) }}>
+      <View style={[styles.smallButton, { borderColor: alpha(tone, 0.55), opacity: disabled ? 0.45 : 1 }]}>
+        <SystemText variant="label" color={tone} style={styles.smallLabel}>
+          {label}
+        </SystemText>
+      </View>
+    </Pressable>
+  );
+}
+
 /** One flat pressable. Never a pressable inside another. */
 function ActionButton({
   label,
@@ -615,6 +879,30 @@ const styles = StyleSheet.create({
   noticeText: { fontSize: 13, lineHeight: 18 },
   loading: { paddingVertical: space.xxl, alignItems: 'center' },
   empty: { fontSize: 12, textAlign: 'center', paddingVertical: space.xl },
+  deadline: { fontSize: 10, letterSpacing: 1.6, marginTop: space.xs },
+  inputShort: { minHeight: 0 },
+
+  goalCard: { marginBottom: space.sm },
+  goalInner: { padding: space.md, gap: space.xs },
+  goalTop: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  focusTag: { fontSize: 9, letterSpacing: 1.8 },
+  goalDue: { fontSize: 9, letterSpacing: 1.4 },
+  goalTitle: { fontSize: 16, lineHeight: 21 },
+  goalActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
+  smallButton: {
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: 7,
+  },
+
+  memoryInner: { paddingVertical: space.xs, paddingHorizontal: space.md },
+  memoryRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm },
+  memoryDivider: { borderTopWidth: 1, borderTopColor: palette.border },
+  memoryText: { flex: 1, minWidth: 0, gap: 2 },
+  memoryKind: { fontSize: 8, letterSpacing: 1.4 },
+  memoryContent: { fontSize: 13, lineHeight: 18 },
+  memoryEmpty: { fontSize: 12, lineHeight: 17, color: palette.textMuted, marginBottom: space.md },
 
   input: {
     borderWidth: 1,

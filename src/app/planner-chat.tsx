@@ -3,19 +3,20 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
-  Platform,
   ScrollView as RNScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { ScrollView } from 'react-native-gesture-handler';
+
+import { Pressable } from '@/components/system/Pressable';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ChatError, Composer, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
 import { Timeline } from '@/components/planner/Timeline';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, font, palette, radius, space } from '@/constants/theme';
+import { alpha, palette, radius, space } from '@/constants/theme';
 import {
   isResumable,
   isStale,
@@ -334,20 +335,7 @@ export default function PlannerChatScreen() {
 
           {busy ? <Typing label={busy === 'sealing' ? 'Fixing a couple of things' : null} /> : null}
 
-          {error ? (
-            <Animated.View entering={FadeIn.duration(200)} style={styles.errorWrap}>
-              <SystemText variant="body" style={styles.errorText}>
-                {error}
-              </SystemText>
-              <Pressable onPress={retry} accessibilityRole="button" accessibilityLabel="Try again">
-                <View style={styles.retry}>
-                  <SystemText variant="label" color={palette.text} style={styles.retryLabel}>
-                    TRY AGAIN
-                  </SystemText>
-                </View>
-              </Pressable>
-            </Animated.View>
-          ) : null}
+          {error ? <ChatError message={error} onRetry={retry} /> : null}
 
           {sealed && draft ? (
             <SealedCard
@@ -363,58 +351,15 @@ export default function PlannerChatScreen() {
         </ScrollView>
 
         {!sealed ? (
-          <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
-            {suggestions.length > 0 && !busy ? (
-              <Animated.View entering={FadeInUp.duration(200)} style={styles.chips}>
-                {suggestions.map((s) => (
-                  <Pressable key={s} onPress={() => void send(s)} accessibilityRole="button" accessibilityLabel={s}>
-                    <View style={[styles.chip, /finalize|seal|lock/i.test(s) && styles.chipSeal]}>
-                      <SystemText
-                        variant="meta"
-                        numberOfLines={1}
-                        style={[styles.chipText, /finalize|seal|lock/i.test(s) && { color: palette.accent }]}>
-                        {s}
-                      </SystemText>
-                    </View>
-                  </Pressable>
-                ))}
-              </Animated.View>
-            ) : null}
-
-            <View style={styles.inputRow}>
-              <TextInput
-                value={input}
-                onChangeText={setInput}
-                placeholder="Message The System…"
-                placeholderTextColor={palette.textFaint}
-                style={styles.input}
-                multiline
-                editable={!busy}
-                accessibilityLabel="Message The System"
-                onKeyPress={(e) => {
-                  // On a desktop browser, Enter sends and Shift+Enter is a new
-                  // line, as every chat app has taught people to expect.
-                  const native = e.nativeEvent as { key: string; shiftKey?: boolean };
-                  if (Platform.OS === 'web' && native.key === 'Enter' && !native.shiftKey) {
-                    (e as unknown as { preventDefault?: () => void }).preventDefault?.();
-                    void send(input);
-                  }
-                }}
-              />
-              <Pressable
-                onPress={() => void send(input)}
-                disabled={!input.trim() || Boolean(busy)}
-                accessibilityRole="button"
-                accessibilityLabel="Send"
-                accessibilityState={{ disabled: !input.trim() || Boolean(busy) }}>
-                <View style={[styles.send, (!input.trim() || busy) && styles.sendOff]}>
-                  <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
-                    ↑
-                  </SystemText>
-                </View>
-              </Pressable>
-            </View>
-          </View>
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSend={(t) => void send(t)}
+            busy={Boolean(busy)}
+            suggestions={suggestions}
+            highlight={(s) => /finalize|seal|lock/i.test(s)}
+            bottomInset={insets.bottom}
+          />
         ) : null}
       </KeyboardAvoidingView>
     </View>
@@ -422,31 +367,6 @@ export default function PlannerChatScreen() {
 }
 
 /* ---------------------------------------------------------------- pieces */
-
-function ModelLine({ text }: { text: string }) {
-  return (
-    <View style={styles.modelRow}>
-      <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-        ◆
-      </SystemText>
-      <SystemText variant="body" style={styles.modelText}>
-        {text}
-      </SystemText>
-    </View>
-  );
-}
-
-function UserBubble({ text }: { text: string }) {
-  return (
-    <View style={styles.userRow}>
-      <View style={styles.userBubble}>
-        <SystemText variant="body" style={styles.userText}>
-          {text}
-        </SystemText>
-      </View>
-    </View>
-  );
-}
 
 function DraftCard({ draft, weekday, issues }: { draft: DraftPlan; weekday: string; issues: string[] }) {
   return (
@@ -465,48 +385,6 @@ function DraftCard({ draft, weekday, issues }: { draft: DraftPlan; weekday: stri
           {issues.length === 1 ? '1 thing' : `${issues.length} things`} to fix — I will sort them when you finalize.
         </SystemText>
       ) : null}
-    </Animated.View>
-  );
-}
-
-/**
- * Three dots, staggered with negative delays so they ripple from the first
- * frame. CSS animations stop themselves on unmount — no cleanup to forget.
- */
-const blink = {
-  '0%': { opacity: 0.25, transform: [{ translateY: 0 }] },
-  '50%': { opacity: 1, transform: [{ translateY: -3 }] },
-  '100%': { opacity: 0.25, transform: [{ translateY: 0 }] },
-};
-
-function Typing({ label }: { label: string | null }) {
-  return (
-    <Animated.View entering={FadeIn.duration(160)} style={styles.modelRow} accessibilityLabel="The System is thinking">
-      <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-        ◆
-      </SystemText>
-      <View style={styles.typing}>
-        {[0, 1, 2].map((i) => (
-          <Animated.View
-            key={i}
-            style={[
-              styles.typingDot,
-              {
-                animationName: blink,
-                animationDuration: '1050ms',
-                animationIterationCount: 'infinite',
-                animationTimingFunction: 'ease-in-out',
-                animationDelay: `${-1050 + i * 175}ms`,
-              },
-            ]}
-          />
-        ))}
-        {label ? (
-          <SystemText variant="meta" style={styles.typingLabel}>
-            {label}
-          </SystemText>
-        ) : null}
-      </View>
     </Animated.View>
   );
 }
@@ -588,20 +466,6 @@ const styles = StyleSheet.create({
 
   stream: { padding: space.lg, gap: space.lg, paddingBottom: space.xl },
 
-  modelRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start', paddingRight: space.lg },
-  modelGlyph: { fontSize: 11, marginTop: 4 },
-  modelText: { flex: 1, fontSize: 15, lineHeight: 22, color: palette.text },
-
-  userRow: { alignItems: 'flex-end', paddingLeft: space.xxl },
-  userBubble: {
-    backgroundColor: palette.surfaceRaised,
-    borderRadius: radius.lg,
-    borderBottomRightRadius: 6,
-    paddingHorizontal: space.md + 2,
-    paddingVertical: space.sm + 2,
-  },
-  userText: { fontSize: 15, lineHeight: 21, color: palette.text },
-
   draft: {
     marginTop: space.md,
     marginLeft: space.lg,
@@ -615,30 +479,6 @@ const styles = StyleSheet.create({
   draftHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   draftLabel: { fontSize: 9, letterSpacing: 1.6 },
   draftIssues: { fontSize: 11, color: palette.gold, marginTop: 2 },
-
-  typing: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 7 },
-  typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.textMuted },
-  typingLabel: { fontSize: 11, color: palette.textMuted, marginLeft: space.sm },
-
-  errorWrap: {
-    marginLeft: space.lg,
-    borderWidth: 1,
-    borderColor: alpha(palette.negative, 0.4),
-    backgroundColor: alpha(palette.negative, 0.08),
-    borderRadius: radius.md,
-    padding: space.md,
-    gap: space.sm,
-  },
-  errorText: { fontSize: 13, lineHeight: 19, color: palette.text },
-  retry: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-  },
-  retryLabel: { fontSize: 9, letterSpacing: 1.6 },
 
   sealed: {
     backgroundColor: palette.surface,
@@ -660,54 +500,4 @@ const styles = StyleSheet.create({
     marginTop: space.md,
   },
   viewLabel: { fontSize: 10, letterSpacing: 2 },
-
-  composer: {
-    borderTopWidth: 1,
-    borderTopColor: palette.border,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
-    gap: space.sm,
-    backgroundColor: palette.bg,
-  },
-  // Wrapping rather than a horizontal ScrollView: RN Web squeezes a
-  // horizontal scroller in a flex column until its chips clip.
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  chip: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-  },
-  chipSeal: { borderColor: alpha(palette.accent, 0.55) },
-  chipText: { fontSize: 12, color: palette.text },
-
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
-  input: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 120,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    borderRadius: 22,
-    backgroundColor: palette.surface,
-    color: palette.text,
-    fontFamily: font.body,
-    fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: space.md + 2,
-    paddingTop: 11,
-    paddingBottom: 11,
-    textAlignVertical: 'top',
-  },
-  send: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: palette.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendOff: { opacity: 0.35 },
-  sendGlyph: { fontSize: 20, lineHeight: 22 },
 });

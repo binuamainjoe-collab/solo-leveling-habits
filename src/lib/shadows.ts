@@ -9,7 +9,7 @@ import type {
   RunStatus,
   Verdict,
 } from '@/data/agents';
-import type { Goal } from '@/data/goals';
+import type { Goal, Memory, MemoryKind } from '@/data/goals';
 
 /**
  * Talking to the shadow army.
@@ -92,6 +92,16 @@ interface RawGoal {
   id: string;
   title: string;
   active: boolean;
+  focus?: boolean;
+  deadline?: string | null;
+  created_at: string;
+}
+
+interface RawMemory {
+  id: string;
+  kind: string;
+  content: string;
+  goal_id: string | null;
   created_at: string;
 }
 
@@ -128,7 +138,26 @@ function toFinding(r: RawFinding): Finding {
 }
 
 function toGoal(r: RawGoal): Goal {
-  return { id: r.id, title: r.title, active: r.active, createdAt: r.created_at };
+  return {
+    id: r.id,
+    title: r.title,
+    active: r.active,
+    focus: r.focus === true,
+    deadline: typeof r.deadline === 'string' ? r.deadline : null,
+    createdAt: r.created_at,
+  };
+}
+
+const MEMORY_KINDS = new Set<MemoryKind>(['fact', 'preference', 'commitment', 'pattern']);
+
+function toMemory(r: RawMemory): Memory {
+  return {
+    id: r.id,
+    kind: MEMORY_KINDS.has(r.kind as MemoryKind) ? (r.kind as MemoryKind) : 'fact',
+    content: r.content,
+    goalId: r.goal_id,
+    createdAt: r.created_at,
+  };
 }
 
 function toRun(r: RawRun): AgentRun {
@@ -146,33 +175,67 @@ function toRun(r: RawRun): AgentRun {
 /* ------------------------------------------------------------ operations */
 
 export interface GoalState {
+  /** The focus goal — the one the shadows and the findings below belong to. */
   goal: Goal | null;
+  /** Every active goal, focus first. */
+  goals: Goal[];
   findings: Finding[];
   runs: AgentRun[];
+  /** What the System remembers, newest first. */
+  memories: Memory[];
 }
 
 /** Everything the Goal screen needs, in one round trip. */
 export async function fetchGoalState(): Promise<ShadowResult<GoalState>> {
-  const res = await call<{ goal: RawGoal | null; findings: RawFinding[]; runs: RawRun[] }>(
-    'goal-api',
-    { op: 'state' },
-  );
+  const res = await call<{
+    goal: RawGoal | null;
+    goals?: RawGoal[];
+    findings: RawFinding[];
+    runs: RawRun[];
+    memories?: RawMemory[];
+  }>('goal-api', { op: 'state' });
   if (!res.ok || !res.data) return { ok: false, error: res.error };
 
+  const focus = res.data.goal ? toGoal(res.data.goal) : null;
   return {
     ok: true,
     data: {
-      goal: res.data.goal ? toGoal(res.data.goal) : null,
+      goal: focus,
+      // An older server sends only the focus; treat that as the whole list.
+      goals: res.data.goals ? res.data.goals.map(toGoal) : focus ? [focus] : [],
       findings: (res.data.findings ?? []).map(toFinding),
       runs: (res.data.runs ?? []).map(toRun),
+      memories: (res.data.memories ?? []).map(toMemory),
     },
   };
 }
 
-export async function setGoal(title: string): Promise<ShadowResult<Goal>> {
-  const res = await call<{ goal: RawGoal }>('goal-api', { op: 'goal.create', args: { title } });
+/**
+ * Add a goal. It becomes the focus only when there is none yet, so adding a
+ * second goal never quietly moves the week's attention.
+ */
+export async function setGoal(title: string, deadline: string | null = null): Promise<ShadowResult<Goal>> {
+  const res = await call<{ goal: RawGoal }>('goal-api', { op: 'goal.create', args: { title, deadline } });
   if (!res.ok || !res.data) return { ok: false, error: res.error };
   return { ok: true, data: toGoal(res.data.goal) };
+}
+
+/** Make a goal the focus. The previous focus stays as an ordinary goal. */
+export async function focusGoal(id: string): Promise<ShadowResult<null>> {
+  const res = await call<unknown>('goal-api', { op: 'goal.focus', args: { id } });
+  return res.ok ? { ok: true, data: null } : { ok: false, error: res.error };
+}
+
+/** Put a goal away. If it was the focus, the oldest remaining goal takes over. */
+export async function archiveGoal(id: string): Promise<ShadowResult<null>> {
+  const res = await call<unknown>('goal-api', { op: 'goal.archive', args: { id } });
+  return res.ok ? { ok: true, data: null } : { ok: false, error: res.error };
+}
+
+/** Make the System forget one thing it remembered. */
+export async function forgetMemory(id: string): Promise<ShadowResult<null>> {
+  const res = await call<unknown>('goal-api', { op: 'memory.forget', args: { id } });
+  return res.ok ? { ok: true, data: null } : { ok: false, error: res.error };
 }
 
 export async function markFindingRead(id: string, read: boolean): Promise<ShadowResult<null>> {

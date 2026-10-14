@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
+import { ScrollView } from 'react-native-gesture-handler';
+
+import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
