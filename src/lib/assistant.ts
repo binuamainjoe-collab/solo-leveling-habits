@@ -94,6 +94,8 @@ export async function sendToSystem(text: string, now: AssistantNow): Promise<Ass
             .filter((m) => typeof m?.content === 'string')
             .map((m) => ({ kind: String(m.kind ?? 'fact'), content: String(m.content) }))
         : [],
+      // Passed through as-is: `vetChanges` is the only thing that decides.
+      changes: Array.isArray(d.changes) ? d.changes.slice(0, 12) : [],
     },
   };
 }

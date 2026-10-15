@@ -5,6 +5,7 @@ import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Timeline, formatMinutes, type LiveTimeline } from '@/components/planner/Timeline';
+import { blockIsDone } from '@/data/assistant';
 import { Card } from '@/components/system/Card';
 import { Screen } from '@/components/system/Screen';
 import { Segmented } from '@/components/system/Segmented';
@@ -12,12 +13,10 @@ import { SystemText } from '@/components/system/SystemText';
 import { palette, radius, space } from '@/constants/theme';
 import {
   isResumable,
-  plannedToQuest,
   plannerConfigured,
   taskIdForBlock,
   type PlannerSession,
 } from '@/data/planner';
-import { QUESTS_BY_ID } from '@/data/quests';
 import {
   addDays,
   busyMinutes,
@@ -29,11 +28,10 @@ import {
   weekdayOf,
   type DailyQuestRef,
   type DraftPlan,
-  type PlanBlock,
 } from '@/data/timeline';
 import { feedback, playSound } from '@/lib/feedback';
 import { loadSession } from '@/lib/plannerSession';
-import { isComplete, useProgress } from '@/store/progress';
+import { isComplete, useProgress, useQuestLookup } from '@/store/progress';
 
 type Day = 'today' | 'tomorrow';
 
@@ -46,6 +44,7 @@ type Day = 'today' | 'tomorrow';
  */
 export default function PlannerScreen() {
   const { state, setProgress } = useProgress();
+  const lookup = useQuestLookup();
 
   const today = state.date;
   const tomorrow = addDays(today, 1);
@@ -90,25 +89,27 @@ export default function PlannerScreen() {
   const dailyQuests: DailyQuestRef[] = useMemo(
     () =>
       state.activeQuestIds
-        .map((id) => QUESTS_BY_ID[id])
-        .filter(Boolean)
+        .flatMap((id) => {
+          const q = lookup(id);
+          return q ? [q] : [];
+        })
         .map((q) => ({ id: q.id, title: q.title, kind: q.kind, target: q.target, unit: q.unit })),
-    [state.activeQuestIds],
+    [state.activeQuestIds, lookup],
   );
 
   const live: LiveTimeline | undefined =
     day === 'today' && plan
       ? {
           now: dayMinutes(minute, plan.wake),
-          isDone: (b) => blockDone(b, state),
+          isDone: (b) => blockIsDone(b, state.values, lookup),
           progressOf: (b) => {
-            const q = b.questId ? QUESTS_BY_ID[b.questId] : undefined;
+            const q = b.questId ? lookup(b.questId) : undefined;
             if (!q) return null;
             return `${state.values[q.id] ?? 0} / ${q.target} ${q.unit}`;
           },
           onToggleTask: (b) => {
             const id = taskIdForBlock(b);
-            const done = blockDone(b, state);
+            const done = blockIsDone(b, state.values, lookup);
             if (done) playSound('tap');
             else feedback('complete', 'success');
             setProgress(id, done ? 0 : 1);
@@ -177,7 +178,7 @@ export default function PlannerScreen() {
                 </SystemText>
                 <View style={styles.chips}>
                   {allDay.map((q) => {
-                    const def = QUESTS_BY_ID[q.id];
+                    const def = lookup(q.id);
                     const done = live && def ? isComplete(def, state.values[q.id] ?? 0) : false;
                     return (
                       <View key={q.id} style={[styles.chip, done && styles.chipDone]}>
@@ -229,19 +230,6 @@ export default function PlannerScreen() {
 }
 
 /** Whether a task or habit block is finished, read from the live board. */
-function blockDone(block: PlanBlock, state: ReturnType<typeof useProgress>['state']): boolean {
-  if (block.kind === 'task') {
-    const id = taskIdForBlock(block);
-    const task = state.planned[id];
-    return task ? isComplete(plannedToQuest(task), state.values[id] ?? 0) : false;
-  }
-  if (block.kind === 'habit' && block.questId) {
-    const q = QUESTS_BY_ID[block.questId];
-    return q ? isComplete(q, state.values[q.id] ?? 0) : false;
-  }
-  return false;
-}
-
 /* --------------------------------------------------------------- buttons */
 
 function PrimaryButton({ label, onPress }: { label: string; onPress: () => void }) {

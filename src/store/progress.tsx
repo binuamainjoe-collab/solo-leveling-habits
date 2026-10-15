@@ -16,6 +16,7 @@ import { buildPlan, type Profile } from '@/data/profile';
 import { blocksToTasks, isPlannedId, plannedToQuest, type PlannedTask } from '@/data/planner';
 import type { DraftPlan, PlanBlock } from '@/data/timeline';
 import { isCeilingQuest, isComplete, windowState } from '@/data/completion';
+import { applyOverride, type QuestOverride } from '@/data/questEdits';
 import { DEFAULT_ACTIVE, QUESTS_BY_ID, type QuestDef } from '@/data/quests';
 import { CATEGORIES, RANKS, type CategoryId, type Rank, type StatKey } from '@/constants/theme';
 import { PersistentStore, storage, type SaveState } from '@/store/storage';
@@ -116,6 +117,11 @@ export interface ProgressState {
   briefingDismissed: string | null;
   /** Collectible cards owned, in the order they were earned. */
   cards: string[];
+  /**
+   * The Player's own versions of catalogue quests — "push-ups: 15, not 100"
+   * — set by asking the System. Optional because older saves have none.
+   */
+  questOverrides?: Record<string, QuestOverride>;
   /** Cards waiting to play their reveal. Never persisted. */
   cardQueue: string[];
   /**
@@ -229,7 +235,8 @@ function questFor(s: ProgressState, id: string): QuestDef | undefined {
     const task = s.planned[id];
     return task ? plannedToQuest(task) : undefined;
   }
-  return QUESTS_BY_ID[id];
+  const quest = QUESTS_BY_ID[id];
+  return quest ? applyOverride(quest, s.questOverrides?.[id]) : undefined;
 }
 
 /** The board for a given day: the standing quests plus that day's plan. */
@@ -414,7 +421,8 @@ interface ProgressApi {
   pendingCard: CardDef | null;
   dismissCard: () => void;
   completeOnboarding: (profile: Profile) => void;
-  setSetting: (key: keyof Settings, value: boolean | string) => void;
+  /** `undefined` clears an optional setting — undoing a wake time that was never set. */
+  setSetting: (key: keyof Settings, value: boolean | string | undefined) => void;
   /**
    * Save a validated timeline as the given day's plan. Its task blocks
    * become one-tap quests on that day's board; fixed blocks and breaks are
@@ -433,6 +441,11 @@ interface ProgressApi {
    */
   addXp: (amount: number) => void;
   setProgress: (questId: string, value: number) => void;
+  /**
+   * Give a catalogue quest the Player's own target, or put it back with
+   * `null`. If that flips today's completion, the XP moves with it.
+   */
+  setQuestOverride: (questId: string, override: QuestOverride | null) => void;
   addProgress: (questId: string, amount: number) => void;
   clearQuest: (questId: string) => void;
   toggleActive: (questId: string) => void;
@@ -745,6 +758,35 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           amount === 0 ? s : applyCards(applyUnlocks({ ...s, xp: Math.max(0, s.xp + amount) })),
         ),
       setProgress: applyValue,
+      setQuestOverride: (questId, override) =>
+        setState((s) => {
+          const before = questFor(s, questId);
+          const overrides = { ...(s.questOverrides ?? {}) };
+          if (override) overrides[questId] = override;
+          else delete overrides[questId];
+          const next: ProgressState = { ...s, questOverrides: overrides };
+          const after = questFor(next, questId);
+          if (!before || !after) return s;
+
+          // Lowering 100 push-ups to 15 when 20 are already logged finishes
+          // the quest; raising it can un-finish it. Either way the reward
+          // follows, exactly as if the quest had been ticked or unticked.
+          const value = s.values[questId] ?? 0;
+          const wasDone = isComplete(before, value);
+          const nowDone = isComplete(after, value);
+          if (wasDone !== nowDone) {
+            const sign = nowDone ? 1 : -1;
+            const paid = nowDone ? after : before;
+            next.xp = Math.max(0, s.xp + sign * paid.xp);
+            next.questCompletions = Math.max(0, s.questCompletions + sign);
+            next.stats = { ...s.stats };
+            for (const [k, v] of Object.entries(paid.stats)) {
+              const key = k as StatKey;
+              next.stats[key] = Math.max(0, (next.stats[key] ?? 0) + sign * (v ?? 0));
+            }
+          }
+          return applyCards(applyUnlocks(recompute(next)));
+        }),
       addProgress: (id, amount) => applyValue(id, (state.values[id] ?? 0) + amount),
       clearQuest: (id) => applyValue(id, 0),
       toggleActive: (id) =>
@@ -780,6 +822,12 @@ export function useActiveQuests(): QuestDef[] {
         .filter((q): q is QuestDef => Boolean(q)),
     [state],
   );
+}
+
+/** Look a quest up the way the store does — overrides and planned tasks included. */
+export function useQuestLookup(): (id: string) => QuestDef | undefined {
+  const { state } = useProgress();
+  return useCallback((id: string) => questFor(state, id), [state]);
 }
 
 export function useDayStats() {

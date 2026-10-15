@@ -27,7 +27,6 @@ import {
   type PlannerContext,
   type PlannerSession,
 } from '@/data/planner';
-import { QUESTS_BY_ID } from '@/data/quests';
 import {
   clockNow,
   defaultPlanDate,
@@ -40,7 +39,7 @@ import {
 } from '@/data/timeline';
 import { feedback, playSound } from '@/lib/feedback';
 import { clearSession, loadSession, saveSession } from '@/lib/plannerSession';
-import { ACCEPT_PLAN_XP, useProgress } from '@/store/progress';
+import { ACCEPT_PLAN_XP, useProgress, useQuestLookup } from '@/store/progress';
 
 type Busy = 'thinking' | 'sealing' | null;
 
@@ -61,6 +60,7 @@ type Busy = 'thinking' | 'sealing' | null;
 export default function PlannerChatScreen() {
   const params = useLocalSearchParams<{ date?: string }>();
   const { state, finalizePlan } = useProgress();
+  const lookup = useQuestLookup();
   const insets = useSafeAreaInsets();
 
   const date = typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date)
@@ -82,8 +82,10 @@ export default function PlannerChatScreen() {
   const scrollRef = useRef<RNScrollView | null>(null);
 
   const dailyQuests: DailyQuestRef[] = state.activeQuestIds
-    .map((id) => QUESTS_BY_ID[id])
-    .filter(Boolean)
+    .flatMap((id) => {
+      const q = lookup(id);
+      return q ? [q] : [];
+    })
     .map((q) => ({ id: q.id, title: q.title, kind: q.kind, target: q.target, unit: q.unit }));
 
   /* ------------------------------------------------------ open / resume */

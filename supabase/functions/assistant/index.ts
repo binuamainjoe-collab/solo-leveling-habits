@@ -9,10 +9,11 @@
  * now (today's board, today's plan, the clock). The model never has to ask
  * for something the System already knows.
  *
- * The model proposes; code decides. A reply can suggest one action (open the
- * planner, say) and up to three things worth remembering. The action is only
- * ever offered as a button — nothing happens until it is tapped — and every
- * memory is checked here before it is stored.
+ * The model proposes; code decides. A reply can carry changes to the app
+ * (a quest's target, the board, progress, the schedule, goals), one action
+ * button (open the planner, say) and up to three things worth remembering.
+ * Changes are checked and applied by the app, which owns the state and
+ * offers Undo; memories are checked here before they are stored.
  *
  * Ops:
  *   history — the recent conversation, no model call
@@ -74,7 +75,23 @@ VOICE
 - Calm, direct, warm. A light System flavour is fine ("Quest logged.", "Noted, Player."), at most once per reply, never forced.
 - No exclamation marks. No hype. No guilt. No urgency language.
 - Never mention diagnoses, conditions or medical topics, and never give medical, legal or financial advice. If asked, say briefly that it is outside what you do.
-- Never claim to have done something you cannot do. You cannot edit their plan or quests directly — you can offer to open the right screen.
+- Never claim to have done something you did not put in changes.
+
+CHANGING THE SYSTEM — you can change the app itself. Put each change in changes; the app checks it, applies it at once, and gives the Player an Undo button.
+- Change things when the Player asks ("make it 20 minutes", "add reading", "I did 30 push-ups", "move my wake time") or clearly agrees to something you proposed ("ok", "do it", "yes change it"). If you are only suggesting, describe it and ask — do not change it yet.
+- When you do change something, say it plainly as done in the reply ("Done: lifting is now 20 minutes, push-ups 15.").
+- Use only ids from CONTEXT. Ops:
+  set_target {quest_id, target, title?} — a new daily target for a counter/duration/value quest on the board or in the catalogue. Give title only if the quest's name holds a number that no longer fits and is not the target itself, e.g. "Study 2 hours" set to 45 → title "Study 45 min".
+  reset_target {quest_id} — back to the original target.
+  add_quest {quest_id} — put a catalogue quest on the board.
+  remove_quest {quest_id} — take a quest off the board.
+  log_progress {quest_id, amount} — record what they did today: amount is how much to ADD in the quest's unit (negative to correct a mistake). For a done/not-done quest any amount marks it done.
+  set_schedule {wake?, sleep?, planning_hour?} — "HH:MM".
+  add_goal {goal_title, deadline?} — a new long-term goal; deadline "YYYY-MM-DD".
+  focus_goal {goal_id} — make a goal the focus.
+- Set realistic targets: when easing a quest, cut it to something they could do on a bad day.
+- You cannot edit the timeline of a plan here; for that, offer plan_today or plan_tomorrow.
+- Most replies change nothing. Return an empty list.
 
 ACTIONS — set action to offer ONE button under your reply. It does nothing until they tap it:
 - plan_tomorrow: they want to plan tomorrow, or it is evening and tomorrow has no plan and planning fits the conversation.
@@ -110,9 +127,33 @@ const RESPONSE_SCHEMA = {
         propertyOrdering: ['kind', 'content'],
       },
     },
+    changes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          op: {
+            type: 'string',
+            enum: ['set_target', 'reset_target', 'add_quest', 'remove_quest', 'log_progress', 'set_schedule', 'add_goal', 'focus_goal'],
+          },
+          quest_id: { type: 'string' },
+          target: { type: 'number' },
+          title: { type: 'string' },
+          amount: { type: 'number' },
+          wake: { type: 'string' },
+          sleep: { type: 'string' },
+          planning_hour: { type: 'string' },
+          goal_title: { type: 'string' },
+          deadline: { type: 'string' },
+          goal_id: { type: 'string' },
+        },
+        required: ['op'],
+        propertyOrdering: ['op', 'quest_id', 'target', 'title', 'amount', 'wake', 'sleep', 'planning_hour', 'goal_title', 'deadline', 'goal_id'],
+      },
+    },
   },
-  required: ['reply', 'suggestions', 'action', 'remember'],
-  propertyOrdering: ['reply', 'suggestions', 'action', 'remember'],
+  required: ['reply', 'suggestions', 'action', 'remember', 'changes'],
+  propertyOrdering: ['reply', 'suggestions', 'action', 'remember', 'changes'],
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -158,6 +199,9 @@ function nowBlock(raw: unknown): { text: string; today: string } {
 
   const tomorrow = (c.tomorrow && typeof c.tomorrow === 'object' ? c.tomorrow : {}) as Record<string, unknown>;
 
+  const quests = Array.isArray(c.quests) ? c.quests.map((q) => str(q, 160)).filter(Boolean).slice(0, 30) : [];
+  const catalog = Array.isArray(c.catalog) ? c.catalog.map((q) => str(q, 90)).filter(Boolean).slice(0, 120) : [];
+
   const lines = [
     `Now: ${str(c.weekday, 12)} ${date}, ${str(c.time, 5)}`,
     `Player: level ${num(c.level, 1, 999) ?? '?'}, rank ${str(c.rank, 2) || '?'}, ${num(c.xp, 0, 10_000_000) ?? 0} XP, streak ${num(c.streak, 0, 10_000) ?? 0} days`,
@@ -170,6 +214,8 @@ function nowBlock(raw: unknown): { text: string; today: string } {
       : "Today's plan: none.",
     `Tomorrow: ${tomorrow.planned === true ? 'already planned' : 'not planned yet'}.`,
     str(c.screen, 30) ? `They opened you from: ${str(c.screen, 30)}` : '',
+    quests.length ? `Quests on the board (id — title — today — kind):\n${quests.map((q) => `  ${q}`).join('\n')}` : '',
+    catalog.length ? `Catalogue quests not on the board (id — title):\n${catalog.map((q) => `  ${q}`).join('\n')}` : '',
   ];
   return { text: lines.filter(Boolean).join('\n'), today: date };
 }
@@ -179,6 +225,7 @@ interface Proposed {
   suggestions?: unknown;
   action?: unknown;
   remember?: unknown;
+  changes?: unknown;
 }
 
 /** Keep only memories that pass every rule above. Exported shape for the app. */
@@ -299,7 +346,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .map((g) => {
           const left = g.deadline ? daysUntil(g.deadline as string, now.today) : null;
           const due = g.deadline ? ` — due ${g.deadline}${left !== null ? ` (${left} days)` : ''}` : '';
-          return `  ${g.focus ? '[FOCUS] ' : ''}${str(g.title, 160)}${due}`;
+          return `  ${g.id} — ${g.focus ? '[FOCUS] ' : ''}${str(g.title, 160)}${due}`;
         })
         .join('\n')
     : '  none set';
@@ -326,7 +373,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     'CONTEXT',
     now.text,
     '',
-    'Goals:',
+    'Goals (id — title):',
     goalLines,
     findingLines.length ? `Unread findings for the focus goal:\n${findingLines.join('\n')}` : '',
     '',
@@ -404,5 +451,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     model: MODEL,
   });
 
-  return json({ reply, suggestions, action, remembered });
+  // Passed on unjudged: the app holds the rules (src/data/questEdits.ts) and
+  // the state they are checked against, so it is the one that decides.
+  const changes = Array.isArray(out?.changes)
+    ? out!.changes.filter((c) => c && typeof c === 'object').slice(0, 8)
+    : [];
+
+  return json({ reply, suggestions, action, remembered, changes });
 });

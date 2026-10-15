@@ -28,6 +28,14 @@ export interface AssistantMessage {
   remembered?: string[];
   /** Only on a model reply from this session. */
   action?: AssistantAction;
+  /** Only on a model reply from this session: what it changed, as lines. */
+  applied?: string[];
+  /** What it tried to change and the app refused, with the reason. */
+  refused?: string[];
+  /** Whether this reply's changes can still be taken back (this session only). */
+  canUndo?: boolean;
+  /** Whether the changes on this reply were undone. */
+  undone?: boolean;
 }
 
 export interface AssistantReply {
@@ -35,6 +43,8 @@ export interface AssistantReply {
   suggestions: string[];
   action: AssistantAction;
   remembered: { kind: string; content: string }[];
+  /** Changes the System proposes; vetted by `vetChanges` before anything happens. */
+  changes: unknown[];
 }
 
 /** What the phone knows about right now, in the shape the server reads. */
@@ -50,6 +60,13 @@ export interface AssistantNow {
   sleep: string | null;
   planningHour: string;
   board: { done: number; total: number; open: string[]; mandatoryOpen: string[] };
+  /**
+   * Every quest on the board with its id and progress, so the System can
+   * name exactly what to change. "id — title — 10/100 reps — counter".
+   */
+  quests: string[];
+  /** Catalogue quests not on the board, which the System can add. "id — title". */
+  catalog: string[];
   today: {
     blocks: { start: string; end: string; kind: string; title: string; focus?: string; done: boolean }[];
     note: string;
@@ -69,6 +86,8 @@ export interface NowInput {
   planned: Record<string, PlannedTask>;
   /** Today's board, already resolved to quest definitions. */
   board: QuestDef[];
+  /** The whole catalogue, for what can be added. */
+  catalog?: QuestDef[];
   level: number;
   rank: string;
   screen: string;
@@ -114,6 +133,17 @@ export function buildNow(input: NowInput): AssistantNow {
       open: open.slice(0, 20).map((q) => q.title),
       mandatoryOpen: open.filter((q) => q.penalty).slice(0, 12).map((q) => q.title),
     },
+    quests: input.board
+      .filter((q) => q.category !== 'planned')
+      .slice(0, 30)
+      .map((q) => {
+        const v = input.values[q.id] ?? 0;
+        const progress = q.kind === 'binary' || q.kind === 'window' ? (v >= q.target ? 'done' : 'not done') : `${v}/${q.target} ${q.unit}`;
+        return `${q.id} — ${q.title} — ${progress} — ${q.kind}${q.penalty ? ' — mandatory' : ''}`;
+      }),
+    catalog: (input.catalog ?? [])
+      .filter((q) => !byId.has(q.id))
+      .map((q) => `${q.id} — ${q.title}`),
     today: plan?.timeline
       ? {
           blocks: plan.timeline.blocks.slice(0, 16).map((b) => ({
