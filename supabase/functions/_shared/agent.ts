@@ -154,6 +154,11 @@ export interface GeminiCall {
   grounded?: boolean;
   /** A responseSchema for JSON mode. */
   schema?: unknown;
+  /**
+   * A spoken message, sent alongside the prompt for the model to hear.
+   * Base64, inline — the request must stay under Gemini's 20 MB limit.
+   */
+  audio?: { mimeType: string; data: string };
   temperature?: number;
   /**
    * How much reasoning to allow.
@@ -208,7 +213,15 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
   }
 
   const body: Record<string, unknown> = {
-    contents: [{ role: 'user', parts: [{ text: call.prompt }] }],
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: call.prompt },
+          ...(call.audio ? [{ inlineData: { mimeType: call.audio.mimeType, data: call.audio.data } }] : []),
+        ],
+      },
+    ],
     generationConfig: {
       temperature: call.temperature ?? 0.6,
       ...(call.thinkingLevel ? { thinkingConfig: { thinkingLevel: call.thinkingLevel } } : {}),

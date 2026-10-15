@@ -67,6 +67,8 @@ export interface Settings {
   remindMorning?: boolean;
   remindPlanning?: boolean;
   remindDrift?: boolean;
+  /** Read the System's replies to spoken messages aloud. On unless switched off. */
+  speakReplies?: boolean;
 }
 
 /** An accepted plan, stored against the day it is FOR. */

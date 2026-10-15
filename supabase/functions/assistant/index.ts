@@ -42,6 +42,10 @@ const MAX_MESSAGE = 1500;
 const MAX_REPLY = 1200;
 const MAX_MEMORIES_IN = 40;
 
+/** About a minute of compressed speech, base64-encoded, with room to spare. */
+const MAX_AUDIO_B64 = 6_000_000;
+const AUDIO_TYPES = ['audio/m4a', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp3'];
+
 const ACTIONS = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests'] as const;
 type Action = (typeof ACTIONS)[number];
 
@@ -107,11 +111,17 @@ MEMORY — remember: up to 3 short, durable things worth knowing next week, in t
 - Never: anything already in MEMORY, passing moods, passwords or numbers, health or medical details, anything about other people beyond a name and a role.
 - Most replies remember nothing. Return an empty list.
 
-suggestions: up to 3 short replies the Player might tap next, in their voice, at most 6 words each. Empty when nothing obvious.`;
+suggestions: up to 3 short replies the Player might tap next, in their voice, at most 6 words each. Empty when nothing obvious.
+
+SPOKEN MESSAGES
+- When the new message is an audio clip, write what the Player said in heard — their words, cleaned of filler (um, uh) — and answer it exactly as if they had typed it. If you cannot make out any words, leave heard empty and reply that you did not catch it.
+- Your reply to a spoken message is read aloud. Keep it to one or two short sentences, and use no symbols, arrows, emoji or lists.
+- For a typed message, heard is empty.`;
 
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
+    heard: { type: 'string' },
     reply: { type: 'string' },
     suggestions: { type: 'array', items: { type: 'string' } },
     action: { type: 'string', enum: [...ACTIONS] },
@@ -153,7 +163,7 @@ const RESPONSE_SCHEMA = {
     },
   },
   required: ['reply', 'suggestions', 'action', 'remember', 'changes'],
-  propertyOrdering: ['reply', 'suggestions', 'action', 'remember', 'changes'],
+  propertyOrdering: ['heard', 'reply', 'suggestions', 'action', 'remember', 'changes'],
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -221,6 +231,7 @@ function nowBlock(raw: unknown): { text: string; today: string } {
 }
 
 interface Proposed {
+  heard?: unknown;
   reply?: unknown;
   suggestions?: unknown;
   action?: unknown;
@@ -255,7 +266,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const db = admin();
   if (!db) return fail('The System is not configured.', 500);
 
-  let body: { op?: unknown; text?: unknown; now?: unknown };
+  let body: { op?: unknown; text?: unknown; now?: unknown; audio?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -276,8 +287,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (body.op !== 'send') return fail('Unknown operation.', 400);
 
   /* ------------------------------------------------------------- send */
-  const text = str(body.text, MAX_MESSAGE);
-  if (!text) return fail('Say something to The System first.', 400);
+  const typed = str(body.text, MAX_MESSAGE);
+
+  // A spoken message: checked here, heard by the model, transcribed in the
+  // same call — one call, not a speech-to-text step and then a reply.
+  let audio: { mimeType: string; data: string } | undefined;
+  if (body.audio && typeof body.audio === 'object') {
+    const a = body.audio as Record<string, unknown>;
+    const mimeType = str(a.mimeType, 40).split(';')[0].toLowerCase();
+    const data = typeof a.data === 'string' ? a.data : '';
+    if (!AUDIO_TYPES.includes(mimeType)) return fail('The System cannot listen to that kind of recording.', 400);
+    if (data.length < 100) return fail('That recording was empty. Try again.', 400);
+    if (data.length > MAX_AUDIO_B64) return fail('That recording is too long. Keep it under a minute.', 413);
+    if (!/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 2000))) return fail('That recording was not readable.', 400);
+    audio = { mimeType, data };
+  }
+  if (!typed && !audio) return fail('Say something to The System first.', 400);
 
   const { data: claimed, error: claimError } = await db.rpc('bump_pool', {
     p_pool: 'assistant',
@@ -390,7 +415,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     transcript,
     '',
     'NEW MESSAGE FROM THE PLAYER',
-    text,
+    audio ? '(spoken — the audio clip attached below)' : typed,
   ]
     .filter((l) => l !== '')
     .join('\n');
@@ -402,6 +427,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     schema: RESPONSE_SCHEMA,
     temperature: 0.7,
     thinkingLevel: 'low',
+    audio,
   });
 
   if (!result.ok || !result.text) {
@@ -415,6 +441,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const out = parseJson<Proposed>(result.text);
   const reply = str(out?.reply, MAX_REPLY);
+  // What was said: the transcript for a spoken message, the text otherwise.
+  const heard = audio ? str(out?.heard, MAX_MESSAGE) : '';
+  const text = audio ? heard : typed;
+  if (audio && !heard) {
+    await finishRun(db, runId, 'ok', 'voice: nothing heard', null, { usage: result.usage, durationMs: result.durationMs, model: MODEL });
+    return fail('The System could not make out what you said. Try again, a little closer to the mic.', 422);
+  }
   if (!reply) {
     await finishRun(db, runId, 'error', null, 'empty reply', { usage: result.usage, durationMs: result.durationMs, model: MODEL });
     return fail('The System went quiet. Try saying that again.', 502);
@@ -457,5 +490,5 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ? out!.changes.filter((c) => c && typeof c === 'object').slice(0, 8)
     : [];
 
-  return json({ reply, suggestions, action, remembered, changes });
+  return json({ reply, suggestions, action, remembered, changes, heard: audio ? heard : null });
 });

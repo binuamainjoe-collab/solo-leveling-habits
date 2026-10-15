@@ -1,4 +1,11 @@
 import { router, useSegments } from 'expo-router';
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
 import { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
@@ -29,6 +36,8 @@ import { QUESTS, QUESTS_BY_ID } from '@/data/quests';
 import { addDays } from '@/data/timeline';
 import { assistantConfigured, loadHistory, sendToSystem } from '@/lib/assistant';
 import { feedback, playSound } from '@/lib/feedback';
+import { resumeMusic, suspendMusic } from '@/lib/music';
+import { readClip, speak, stopSpeaking, type VoiceClip } from '@/lib/voice';
 import { archiveGoal, fetchGoalState, focusGoal, setGoal } from '@/lib/shadows';
 import { useActiveQuests, useDayStats, useProgress } from '@/store/progress';
 
@@ -101,10 +110,19 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ text: string; clip?: VoiceClip } | null>(null);
   const [loaded, setLoaded] = useState(!configured);
 
   const [goals, setGoals] = useState<Goal[]>([]);
+
+  // Push-to-talk: tap the mic, speak, tap send. Replies to spoken messages
+  // are read aloud unless the Player has muted them.
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder, 250);
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'sending'>('idle');
+  const [speaking, setSpeaking] = useState(false);
+  const speakReplies = state.settings.speakReplies ?? true;
+  const seconds = voiceState === 'recording' ? Math.floor(recorderState.durationMillis / 1000) : 0;
 
   const scrollRef = useRef<RNScrollView | null>(null);
   /** How to take back the changes on a reply, by message index. */
@@ -133,9 +151,12 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     return () => sub.remove();
   }, []);
 
-  async function ask(text: string) {
+  async function ask(text: string, clip?: VoiceClip) {
     setBusy(true);
     setError(null);
+    // A spoken message shows as a placeholder until the System says what it
+    // heard. It is added per attempt, so a failed clip leaves nothing behind.
+    if (clip) setMessages((m) => [...m, { role: 'user', text: '…', voice: true }]);
     const now = buildNow({
       date: state.date,
       xp: state.xp,
@@ -150,11 +171,15 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       rank,
       screen,
     });
-    const res = await sendToSystem(text, now);
+    const res = await sendToSystem(text, now, clip);
 
     if (!res.ok || !res.data) {
       setBusy(false);
-      setPending(text);
+      setPending({ text, clip });
+      if (clip) {
+        setMessages((prev) => prev.filter((_, i) => i !== lastIndex(prev, (x) => Boolean(x.voice) && x.text === '…')));
+        resumeMusic();
+      }
       setError(res.error ?? 'The System did not answer.');
       return;
     }
@@ -175,7 +200,10 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     setBusy(false);
     if (applied.length) feedback('complete', 'success');
 
-    setMessages((m) => {
+    const heard = res.data.heard;
+    setMessages((prev) => {
+      // The placeholder becomes the words the System heard.
+      const m = clip && heard ? prev.map((msg, i) => (i === lastIndex(prev, (x) => Boolean(x.voice) && x.text === '…') ? { ...msg, text: heard } : msg)) : prev;
       undoers.current[m.length] = undo;
       return [
         ...m,
@@ -191,6 +219,17 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       ];
     });
     setSuggestions(res.data.suggestions);
+
+    // Answer in kind: a spoken question gets a spoken reply.
+    if (clip && speakReplies) {
+      setSpeaking(true);
+      speak(res.data.reply, () => {
+        setSpeaking(false);
+        resumeMusic();
+      });
+    } else if (clip) {
+      resumeMusic();
+    }
   }
 
   /**
@@ -286,10 +325,97 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, undone: true } : msg)));
   }
 
+  /* ------------------------------------------------------------- voice */
+
+  const LIMIT = 60;
+
+  async function startRecording() {
+    if (busy || voiceState !== 'idle') return;
+    stopSpeaking();
+    setError(null);
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setError('The System needs the microphone to hear you. Allow it in your phone settings, then try again.');
+        return;
+      }
+      // The music would end up in the recording.
+      suspendMusic();
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      playSound('tap');
+      setVoiceState('recording');
+    } catch (err) {
+      resumeMusic();
+      setVoiceState('idle');
+      setError(`The microphone could not start. ${err instanceof Error ? err.message : ''}`.trim());
+    }
+  }
+
+  /** Stop the recorder and hand back where the clip is, or null. */
+  async function finishRecording(): Promise<string | null> {
+    try {
+      await recorder.stop();
+    } catch {
+      // Already stopped; the uri below is still the answer.
+    }
+    // Recording mode routes iOS playback to the earpiece; replies should
+    // come out of the speaker.
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    return recorder.uri;
+  }
+
+  async function cancelRecording() {
+    playSound('tap');
+    setVoiceState('idle');
+    await finishRecording();
+    resumeMusic();
+  }
+
+  async function sendRecording() {
+    if (voiceState !== 'recording') return;
+    const length = Math.floor(recorderState.durationMillis / 1000);
+    setVoiceState('sending');
+    const uri = await finishRecording();
+    if (!uri || length < 1) {
+      setVoiceState('idle');
+      resumeMusic();
+      setError('That was too short to hear. Tap the mic, say it, then tap send.');
+      return;
+    }
+    playSound('tap');
+    let clip: VoiceClip;
+    try {
+      clip = await readClip(uri);
+    } catch {
+      setVoiceState('idle');
+      resumeMusic();
+      setError('The recording could not be read. Try again.');
+      return;
+    }
+    setSuggestions([]);
+    setVoiceState('idle');
+    await ask('', clip);
+  }
+
+  // A minute is plenty for one message; at the limit it sends itself.
+  useEffect(() => {
+    if (voiceState !== 'recording' || seconds < LIMIT) return;
+    void (async () => {
+      await sendRecording();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seconds, voiceState]);
+
+  // Closing the sheet silences it.
+  useEffect(() => () => stopSpeaking(), []);
+
   function send(raw: string) {
     const text = raw.trim();
     if (!text || busy) return;
     playSound('tap');
+    stopSpeaking();
     setMessages((m) => [...m, { role: 'user', text }]);
     setInput('');
     setSuggestions([]);
@@ -324,6 +450,25 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                   Knows your goals, your plan and how your days are going.
                 </SystemText>
               </View>
+              {/* While it talks: stop. Otherwise: whether spoken replies are read aloud. */}
+              <Pressable
+                onPress={() => {
+                  playSound('tap');
+                  if (speaking) {
+                    stopSpeaking();
+                    setSpeaking(false);
+                  } else {
+                    setSetting('speakReplies', !speakReplies);
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={speaking ? 'Stop speaking' : speakReplies ? 'Mute spoken replies' : 'Read replies aloud'}>
+                <View style={[styles.speaker, speaking && styles.speakerOn]}>
+                  <SystemText variant="label" color={speaking ? palette.bg : speakReplies ? palette.accent : palette.textFaint} style={styles.speakerLabel}>
+                    {speaking ? '■ STOP' : speakReplies ? 'VOICE ON' : 'VOICE OFF'}
+                  </SystemText>
+                </View>
+              </Pressable>
               <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
                 <View style={styles.close}>
                   <SystemText variant="title" color={palette.textMuted} style={styles.closeGlyph}>
@@ -352,7 +497,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
 
               {messages.map((m, i) => (
                 <Animated.View key={i} entering={FadeInDown.duration(200)}>
-                  {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} />}
+                  {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.voice ? `🎙 ${m.text}` : m.text} />}
                   {m.role === 'model' && m.applied && m.applied.length > 0 ? (
                     <View style={[styles.changes, m.undone && styles.changesUndone]}>
                       <SystemText variant="label" color={m.undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
@@ -406,7 +551,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                 <ChatError
                   message={error}
                   onRetry={() => {
-                    if (pending) void ask(pending);
+                    if (pending) void ask(pending.text, pending.clip);
                   }}
                 />
               ) : null}
@@ -422,6 +567,14 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                 highlight={(s) => /plan/i.test(s)}
                 bottomInset={insets.bottom}
                 placeholder="Ask The System…"
+                voice={{
+                  state: voiceState,
+                  seconds,
+                  limit: LIMIT,
+                  onStart: () => void startRecording(),
+                  onStop: () => void sendRecording(),
+                  onCancel: () => void cancelRecording(),
+                }}
               />
             ) : null}
           </KeyboardAvoidingView>
@@ -492,6 +645,15 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, minWidth: 0, gap: 2 },
   kicker: { fontSize: 10, letterSpacing: 2.4 },
   sub: { fontSize: 11, color: palette.textMuted },
+  speaker: {
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.sm + 2,
+    paddingVertical: 5,
+  },
+  speakerOn: { backgroundColor: palette.accent, borderColor: palette.accent },
+  speakerLabel: { fontSize: 9, letterSpacing: 1.4 },
   close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   closeGlyph: { fontSize: 24, lineHeight: 26 },
 

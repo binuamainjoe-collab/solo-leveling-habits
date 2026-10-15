@@ -113,6 +113,7 @@ export function Composer({
   highlight,
   bottomInset,
   placeholder = 'Message The System…',
+  voice,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -123,8 +124,11 @@ export function Composer({
   highlight?: (chip: string) => boolean;
   bottomInset: number;
   placeholder?: string;
+  /** Push-to-talk. When given, an empty box shows a mic instead of send. */
+  voice?: VoiceControls;
 }) {
   const empty = !value.trim();
+  const recording = voice?.state === 'recording';
   return (
     <View style={[styles.composer, { paddingBottom: Math.max(bottomInset, space.sm) }]}>
       {suggestions.length > 0 && !busy ? (
@@ -144,6 +148,9 @@ export function Composer({
         </Animated.View>
       ) : null}
 
+      {recording && voice ? (
+        <RecordingBar voice={voice} />
+      ) : (
       <View style={styles.inputRow}>
         <TextInput
           value={value}
@@ -162,19 +169,106 @@ export function Composer({
             }
           }}
         />
-        <Pressable
-          onPress={() => onSend(value)}
-          disabled={empty || busy}
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          accessibilityState={{ disabled: empty || busy }}>
-          <View style={[styles.send, (empty || busy) && styles.sendOff]}>
-            <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
-              ↑
-            </SystemText>
-          </View>
-        </Pressable>
+        {voice && empty ? (
+          <Pressable
+            onPress={voice.onStart}
+            disabled={busy || voice.state === 'sending'}
+            accessibilityRole="button"
+            accessibilityLabel="Speak to The System"
+            accessibilityState={{ disabled: busy || voice.state === 'sending' }}>
+            <View style={[styles.send, (busy || voice.state === 'sending') && styles.sendOff]}>
+              <MicGlyph color={palette.bg} />
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={() => onSend(value)}
+            disabled={empty || busy}
+            accessibilityRole="button"
+            accessibilityLabel="Send"
+            accessibilityState={{ disabled: empty || busy }}>
+            <View style={[styles.send, (empty || busy) && styles.sendOff]}>
+              <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
+                ↑
+              </SystemText>
+            </View>
+          </Pressable>
+        )}
       </View>
+      )}
+    </View>
+  );
+}
+
+export interface VoiceControls {
+  state: 'idle' | 'recording' | 'sending';
+  /** Seconds recorded so far. */
+  seconds: number;
+  /** Seconds after which recording stops and sends on its own. */
+  limit: number;
+  onStart: () => void;
+  /** Stop and send. */
+  onStop: () => void;
+  /** Stop and throw away. */
+  onCancel: () => void;
+}
+
+/** A microphone drawn from two views, so it needs no icon font or image. */
+function MicGlyph({ color }: { color: string }) {
+  return (
+    <View style={styles.mic}>
+      <View style={[styles.micHead, { borderColor: color, backgroundColor: color }]} />
+      <View style={[styles.micStand, { borderColor: color }]} />
+    </View>
+  );
+}
+
+const pulse = {
+  '0%': { opacity: 1, transform: [{ scale: 1 }] },
+  '50%': { opacity: 0.35, transform: [{ scale: 0.75 }] },
+  '100%': { opacity: 1, transform: [{ scale: 1 }] },
+};
+
+/**
+ * While listening: a pulsing dot, the time, and the two ways out — throw it
+ * away, or send it. Tapping send is the push in push-to-talk.
+ */
+function RecordingBar({ voice }: { voice: VoiceControls }) {
+  const left = Math.max(0, voice.limit - voice.seconds);
+  const mm = Math.floor(voice.seconds / 60);
+  const ss = String(voice.seconds % 60).padStart(2, '0');
+  return (
+    <View style={styles.inputRow}>
+      <Pressable onPress={voice.onCancel} accessibilityRole="button" accessibilityLabel="Cancel the recording">
+        <View style={styles.cancel}>
+          <SystemText variant="title" color={palette.textMuted} style={styles.cancelGlyph}>
+            ×
+          </SystemText>
+        </View>
+      </Pressable>
+      <View style={styles.recording} accessibilityLiveRegion="polite">
+        <Animated.View
+          style={[
+            styles.recDot,
+            { animationName: pulse, animationDuration: '1100ms', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out' },
+          ]}
+        />
+        <SystemText variant="body" style={styles.recText}>
+          Listening… {mm}:{ss}
+        </SystemText>
+        {left <= 10 ? (
+          <SystemText variant="meta" style={styles.recLeft}>
+            {left}s left
+          </SystemText>
+        ) : null}
+      </View>
+      <Pressable onPress={voice.onStop} accessibilityRole="button" accessibilityLabel="Send the recording">
+        <View style={styles.send}>
+          <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
+            ↑
+          </SystemText>
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -264,5 +358,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendOff: { opacity: 0.35 },
+  mic: { alignItems: 'center', justifyContent: 'center' },
+  micHead: { width: 10, height: 15, borderRadius: 5, borderWidth: 2 },
+  micStand: { width: 16, height: 9, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 2, borderTopWidth: 0, marginTop: -5 },
+  cancel: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: palette.borderStrong },
+  cancelGlyph: { fontSize: 22, lineHeight: 24 },
+  recording: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    borderWidth: 1,
+    borderColor: alpha(palette.negative, 0.5),
+    borderRadius: 22,
+    backgroundColor: alpha(palette.negative, 0.08),
+    paddingHorizontal: space.md + 2,
+  },
+  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: palette.negative },
+  recText: { flex: 1, fontSize: 15, color: palette.text },
+  recLeft: { fontSize: 11, color: palette.gold },
   sendGlyph: { fontSize: 20, lineHeight: 22 },
 });

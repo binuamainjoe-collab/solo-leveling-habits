@@ -1,4 +1,5 @@
 import type { AssistantAction, AssistantMessage, AssistantNow, AssistantReply } from '@/data/assistant';
+import type { VoiceClip } from '@/lib/voice';
 
 /**
  * Talking to The System's assistant function.
@@ -72,9 +73,17 @@ export async function loadHistory(): Promise<AssistantResult<AssistantMessage[]>
   return { ok: true, data: messages };
 }
 
-/** One message in, one reply out — re-read and capped, never trusted whole. */
-export async function sendToSystem(text: string, now: AssistantNow): Promise<AssistantResult<AssistantReply>> {
-  const res = await call<Record<string, unknown>>({ op: 'send', text, now });
+/**
+ * One message in, one reply out — re-read and capped, never trusted whole.
+ * A spoken message carries the clip instead of text; the reply then says
+ * what was heard.
+ */
+export async function sendToSystem(
+  text: string,
+  now: AssistantNow,
+  audio?: VoiceClip,
+): Promise<AssistantResult<AssistantReply>> {
+  const res = await call<Record<string, unknown>>(audio ? { op: 'send', now, audio } : { op: 'send', text, now });
   if (!res.ok || !res.data) return { ok: false, error: res.error };
 
   const d = res.data;
@@ -96,6 +105,7 @@ export async function sendToSystem(text: string, now: AssistantNow): Promise<Ass
         : [],
       // Passed through as-is: `vetChanges` is the only thing that decides.
       changes: Array.isArray(d.changes) ? d.changes.slice(0, 12) : [],
+      heard: typeof d.heard === 'string' ? d.heard.trim() : null,
     },
   };
 }

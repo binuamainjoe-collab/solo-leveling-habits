@@ -36,6 +36,8 @@ export interface AssistantMessage {
   canUndo?: boolean;
   /** Whether the changes on this reply were undone. */
   undone?: boolean;
+  /** A user message that was spoken rather than typed. */
+  voice?: boolean;
 }
 
 export interface AssistantReply {
@@ -45,6 +47,8 @@ export interface AssistantReply {
   remembered: { kind: string; content: string }[];
   /** Changes the System proposes; vetted by `vetChanges` before anything happens. */
   changes: unknown[];
+  /** For a spoken message: what the System heard. */
+  heard: string | null;
 }
 
 /** What the phone knows about right now, in the shape the server reads. */

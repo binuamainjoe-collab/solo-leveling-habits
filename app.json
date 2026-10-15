@@ -36,7 +36,12 @@
           "imageWidth": 76
         }
       ],
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to hear you when you talk to The System."
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {
