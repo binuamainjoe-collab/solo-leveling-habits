@@ -1,7 +1,16 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { LogBox, Platform } from 'react-native';
 
 import { REMINDER_PREFIX, type ReminderSpec } from '@/data/reminders';
+
+// Expo Go warns at every launch that *push* notifications need a development
+// build. This app only schedules local ones, which Expo Go supports, so the
+// warnings are noise that reads like a crash on the phone. LogBox rechecks
+// earlier logs when a pattern is added, so ignoring them after the import works.
+LogBox.ignoreLogs([
+  '`expo-notifications` functionality is not fully supported in Expo Go',
+  '[expo-notifications] Push notifications (remote notifications) are unavailable in Expo Go',
+]);
 
 /**
  * Putting the System's reminders on the phone.

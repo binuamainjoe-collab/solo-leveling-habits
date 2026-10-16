@@ -13,6 +13,7 @@ import { alpha, palette, radius, space } from '@/constants/theme';
 import {
   forgetAccount,
   listAccounts,
+  setSignInSkipped,
   signInWithGoogle,
   switchAccount,
   type Account,
@@ -23,10 +24,10 @@ import { supabaseConfigured } from '@/lib/supabase';
 /**
  * Linking a Google account, and choosing between the ones already linked.
  *
- * Signing in is optional by design. The app was local-first before any of this
- * existed and still is: an account buys you the same progress on your phone
- * and in the browser, plus Calendar and Tasks. Refusing it costs nothing, so
- * "Keep it on this device" is a first-class choice rather than a dismissal.
+ * This is the first screen a signed-out student sees. Signing in is still
+ * optional: an account buys the same progress on the phone and in the
+ * browser, plus Calendar and Tasks, and "Keep it on this device" is a real
+ * answer that is remembered, so the question is not repeated every launch.
  */
 export default function SignInScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -153,6 +154,7 @@ export default function SignInScreen() {
           label="Keep it on this device"
           onPress={() => {
             playSound('tap');
+            void setSignInSkipped(true);
             router.replace('/');
           }}
           disabled={busy !== null}

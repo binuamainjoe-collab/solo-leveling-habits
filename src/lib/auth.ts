@@ -1,6 +1,7 @@
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
@@ -112,6 +113,52 @@ export async function forgetAccount(id: string): Promise<void> {
   await writeAccounts((await listAccounts()).filter((a) => a.id !== id));
 }
 
+/* ------------------------------------------------------- asking at launch */
+
+/**
+ * Sign-in is the first thing the app asks for. "Keep it on this device" is
+ * still a real answer, and it is remembered so the question is not repeated
+ * at every launch. Signing in clears it, so signing out later asks again.
+ */
+const SKIP_KEY = 'system.signin.skipped.v1';
+let skipped: boolean | undefined;
+let skipLoading = false;
+const skipListeners = new Set<() => void>();
+
+function emitSkip() {
+  skipListeners.forEach((l) => l());
+}
+
+function subscribeSkip(listener: () => void) {
+  skipListeners.add(listener);
+  if (!skipLoading) {
+    skipLoading = true;
+    storage
+      .get(SKIP_KEY)
+      .then((v) => {
+        skipped = v === '1';
+      })
+      .catch(() => {
+        skipped = false;
+      })
+      .finally(emitSkip);
+  }
+  return () => {
+    skipListeners.delete(listener);
+  };
+}
+
+/** Whether the student chose to stay device-only; `undefined` while loading. */
+export function useSignInSkipped(): boolean | undefined {
+  return useSyncExternalStore(subscribeSkip, () => skipped, () => skipped);
+}
+
+export async function setSignInSkipped(value: boolean): Promise<void> {
+  skipped = value;
+  emitSkip();
+  await (value ? storage.set(SKIP_KEY, '1') : storage.remove(SKIP_KEY)).catch(() => {});
+}
+
 /* ----------------------------------------------------------- the OAuth run */
 
 export interface AuthResult {
@@ -164,6 +211,26 @@ async function sessionFromUrl(url: string): Promise<Session | null> {
 }
 
 /**
+ * Ask the auth server whether Google sign-in is switched on. supabase-js
+ * builds the sign-in URL locally without asking, so when the provider is off
+ * the browser opens on a raw JSON error and the student is stranded there.
+ * Asking first turns that into a plain sentence in the app. Unknown (offline,
+ * odd response) counts as on, so a flaky check never blocks a working setup.
+ */
+async function googleEnabled(): Promise<boolean> {
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  const anon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  try {
+    const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: anon } });
+    if (!res.ok) return true;
+    const settings = (await res.json()) as { external?: { google?: unknown } };
+    return settings.external?.google !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Sign in with Google.
  *
  * `prompt: 'select_account consent'` is doing two jobs. `select_account` is
@@ -175,6 +242,13 @@ async function sessionFromUrl(url: string): Promise<Session | null> {
 export async function signInWithGoogle(): Promise<AuthResult> {
   if (!supabaseConfigured() || !client) {
     return { ok: false, error: 'Sign-in is not set up yet. The System has no account server to talk to.' };
+  }
+
+  if (!(await googleEnabled())) {
+    return {
+      ok: false,
+      error: 'Google sign-in is switched off on the account server. Turn on the Google provider in Supabase, then try again.',
+    };
   }
 
   const redirectTo = makeRedirectUri();

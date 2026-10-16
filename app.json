@@ -42,7 +42,10 @@
           "microphonePermission": "Allow $(PRODUCT_NAME) to hear you when you talk to The System."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-image",
+      "expo-web-browser",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

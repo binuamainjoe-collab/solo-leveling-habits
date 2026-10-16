@@ -412,6 +412,8 @@ function applyCards(s: ProgressState): ProgressState {
 interface ProgressApi {
   state: ProgressState;
   ready: boolean;
+  /** The signed-in account the loaded state belongs to, or null on device-only. */
+  accountId: string | null;
   /** Whether the latest change has reached disk. */
   saveState: SaveState;
   saveError: string | null;
@@ -473,8 +475,12 @@ async function readEnvelope(key: string): Promise<Envelope | null> {
  * keeps the whole sync path dormant on a device that has never signed in —
  * including the student's phone today.
  */
-function useActiveAccountId(): string | null {
+function useActiveAccountId(): { id: string | null; checked: boolean } {
   const [id, setId] = useState<string | null>(null);
+  // Whether the saved session has been read yet. Until it has, "no account"
+  // only means "not known", and acting on it would load the device board
+  // (or send a signed-in student to sign in) for a moment.
+  const [checked, setChecked] = useState(!client);
 
   useEffect(() => {
     if (!client) return;
@@ -485,7 +491,10 @@ function useActiveAccountId(): string | null {
       .then(({ data }) => {
         if (alive) setId(data.session?.user?.id ?? null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setChecked(true);
+      });
 
     const { data } = client.auth.onAuthStateChange((_event, session) => {
       setId(session?.user?.id ?? null);
@@ -497,7 +506,7 @@ function useActiveAccountId(): string | null {
     };
   }, []);
 
-  return id;
+  return { id, checked };
 }
 
 export function ProgressProvider({ children }: { children: ReactNode }) {
@@ -518,10 +527,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   // Which Google account is active, or null for a device-only hunter. The key
   // progress is stored under follows this, so switching accounts swaps the
   // whole board rather than mixing two students together.
-  const accountId = useActiveAccountId();
+  const { id: accountId, checked: accountChecked } = useActiveAccountId();
 
   /** False the instant the account changes, true once its state has loaded. */
-  const ready = readyFor === accountId;
+  const ready = accountChecked && readyFor === accountId;
 
   // The timestamp of the most recent local change. Saved into the envelope and
   // sent with the push, so the device copy and the server copy agree about
@@ -703,6 +712,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     return {
       state,
       ready,
+      accountId,
       saveState,
       saveError,
       onboarded: state.profile !== null,
@@ -802,7 +812,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         ),
       resetAll: () => setState(recompute(blankState())),
     };
-  }, [state, ready, saveState, saveError, applyValue]);
+  }, [state, ready, accountId, saveState, saveError, applyValue]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

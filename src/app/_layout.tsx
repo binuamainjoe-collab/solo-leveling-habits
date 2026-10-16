@@ -19,7 +19,7 @@ import { UnlockOverlay } from '@/components/achievement/UnlockOverlay';
 import { SystemAssistant } from '@/components/assistant/SystemAssistant';
 import { CardRevealOverlay } from '@/components/card/CardRevealOverlay';
 import { BreathingExercise } from '@/components/system/BreathingGate';
-import { rememberAccount } from '@/lib/auth';
+import { rememberAccount, setSignInSkipped, useSignInSkipped } from '@/lib/auth';
 import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
 import { initMusic, resumeMusic, setMusicEnabled, suspendMusic } from '@/lib/music';
@@ -83,21 +83,42 @@ export default function RootLayout() {
 }
 
 /**
- * Sends a student without a profile to the intake, and anyone who already has
- * one away from it. Waits for `ready` so a returning student never sees
- * onboarding flash before their saved profile has loaded.
+ * True while the launch question — sign in with Google, or keep it on this
+ * device — is still unanswered. Undefined until both the saved session and
+ * the saved answer have been read, so nothing decides on a guess.
+ */
+function useNeedsSignIn(): boolean | undefined {
+  const { ready, accountId } = useProgress();
+  const skipped = useSignInSkipped();
+  if (!supabaseConfigured()) return false;
+  if (!ready || skipped === undefined) return undefined;
+  return !accountId && !skipped;
+}
+
+/**
+ * The order a student meets the app in: sign in first, then the intake, then
+ * the board. Waits for `ready` so a returning student never sees sign-in or
+ * onboarding flash before their saved session and profile have loaded.
  */
 function OnboardingGate() {
   const { ready, onboarded } = useProgress();
+  const needsSignIn = useNeedsSignIn();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
-    if (!ready) return;
-    const inOnboarding = segments[0] === 'onboarding';
+    if (!ready || needsSignIn === undefined) return;
+    const top = segments[0];
+    if (needsSignIn) {
+      if (top !== 'signin') router.replace('/signin');
+      return;
+    }
+    const inOnboarding = top === 'onboarding';
+    // The sign-in screen is also opened on purpose from the Hunter tab, so
+    // only a student with no profile yet is moved off it.
     if (!onboarded && !inOnboarding) router.replace('/onboarding');
     else if (onboarded && inOnboarding) router.replace('/');
-  }, [ready, onboarded, segments, router]);
+  }, [ready, onboarded, needsSignIn, segments, router]);
 
   return null;
 }
@@ -162,6 +183,9 @@ function AuthBridge() {
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
         void rememberAccount(session);
       }
+      // Signing in answers the launch question for good; signing out later
+      // should ask it again rather than inherit an old "not now".
+      if (session && event === 'SIGNED_IN') void setSignInSkipped(false);
     });
 
     return () => data.subscription.unsubscribe();
@@ -289,10 +313,11 @@ function ReminderBridge() {
  */
 function BreathingGate() {
   const { ready, onboarded } = useProgress();
+  const needsSignIn = useNeedsSignIn();
   const [done, setDone] = useState(false);
   const finish = useCallback(() => setDone(true), []);
 
-  if (!ready || !onboarded || done) return null;
+  if (!ready || !onboarded || needsSignIn !== false || done) return null;
   return <BreathingExercise onFinish={finish} />;
 }
 
