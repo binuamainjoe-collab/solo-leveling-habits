@@ -9,10 +9,28 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
-/** The current Flash model, per ai.google.dev/gemini-api/docs/models. */
-export const MODEL = 'gemini-3.8-flash';
-export const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+import {
+  type Attempt,
+  attemptTimeout,
+  BACKGROUND_BUDGET_MS,
+  benchModel,
+  billedUsage,
+  DEEP_TIMEOUT_MS,
+  DEFAULT_MODELS,
+  type Failure,
+  geminiUrl,
+  modelsFor,
+  runModel,
+  worthBenching,
+  worthFallingBack,
+  type Tier,
+} from './models.ts';
+
+/**
+ * The Flash id, kept for callers that log a model when Gemini named none.
+ * `gemini()` itself always reports the model that actually answered.
+ */
+export const MODEL = DEFAULT_MODELS.fast;
 
 /** Calls allowed per UTC day, across every agent and the nightly briefing. */
 export const DAILY_CAP = 30;
@@ -163,12 +181,39 @@ export interface GeminiCall {
   /**
    * How much reasoning to allow.
    *
-   * Deliberately no 'minimal': Google lists it as unsupported — and
-   * erroring — on 3.8 and 3.7 Flash, which is what this project runs.
-   * Omitting the field entirely defaults to 'high', so a caller that wants
-   * a cheap, fast call has to say 'low' explicitly.
+   * Deliberately no 'minimal': neither gemini-4-argon nor 3.8 Flash
+   * supports it, and asking errors. Omitting the field uses the model's
+   * default ('medium'), so a caller that wants a fast call says 'low'.
    */
-  thinkingLevel?: 'low' | 'high';
+  thinkingLevel?: 'low' | 'medium' | 'high';
+  /**
+   * Which model tier (see models.ts). Deep unless a caller says otherwise,
+   * so Beru, Igris and the Steward all get the flagship, with Flash behind.
+   */
+  tier?: Tier;
+  /** How long a deep attempt may run before Flash is asked instead. */
+  deepTimeoutMs?: number;
+  /**
+   * The most every attempt together may take, from this call on, so the
+   * Flash fallback cannot run past the moment the app gives up. Defaults to
+   * BACKGROUND_BUDGET_MS, which keeps a shadow's run inside the edge
+   * function's time limit.
+   */
+  budgetMs?: number;
+  /**
+   * Reserve one more model call against the caller's daily cap before the
+   * fallback is asked. A fallback is a second billed request, so it counts
+   * like one; when the cap has nothing left, the call ends with the first
+   * model's failure instead. Defaults to the shadows' shared budget
+   * (DAILY_CAP), which is what Beru, Igris and the Steward draw on.
+   */
+  claimFallback?: () => Promise<boolean>;
+  /**
+   * Whether the text of a 200 is something the caller can use (for
+   * example, JSON with a non-empty reply). When it is not, the next model
+   * is asked instead of handing the caller an answer it would throw away.
+   */
+  accept?: (text: string) => boolean;
 }
 
 /**
@@ -189,8 +234,13 @@ export interface GeminiResult {
   text?: string;
   /** Present only on a grounded call that actually searched. */
   sources?: { uri: string; title: string }[];
-  /** What Gemini says it actually served. */
+  /**
+   * What Gemini says it served, or the model that failed. After a fallback,
+   * every attempt in order ("gemini-4-argon:timeout>gemini-3.8-flash"; see
+   * runModel), so the run log and the Steward's cost line see both.
+   */
   modelVersion?: string;
+  /** Every attempt's tokens together (see billedUsage), not only the last one's. */
   usage?: GeminiUsage;
   durationMs?: number;
   error?: string;
@@ -233,24 +283,98 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
   if (call.system) body.systemInstruction = { parts: [{ text: call.system }] };
   if (call.grounded) body.tools = [{ google_search: {} }];
 
+  // Deep first, Flash behind it. Only a failure Flash might not share moves
+  // on; anything the model actually answered is the answer.
+  const models = modelsFor(call.tier ?? 'deep', (name) => Deno.env.get(name));
   const startedAt = Date.now();
+  const budgetMs = call.budgetMs ?? BACKGROUND_BUDGET_MS;
+  const attempts: Attempt[] = [];
+  // Whatever the last attempt ended with, carrying every attempt's model
+  // and tokens: a turn that paid for the flagship and then Flash is logged
+  // and priced as both.
+  const settle = (r: GeminiResult): GeminiResult => ({ ...r, modelVersion: runModel(attempts), usage: billedUsage(attempts) });
+  let result: GeminiResult = { ok: false, error: 'The System could not reach the model.' };
+  for (let i = 0; i < models.length; i++) {
+    const last = i === models.length - 1;
+    const timeoutMs = attemptTimeout(last, call.deepTimeoutMs ?? DEEP_TIMEOUT_MS.background, budgetMs - (Date.now() - startedAt));
+    const attempt = await geminiOnce(models[i], body, key, call.grounded === true, startedAt, timeoutMs);
+    result = attempt.result;
+    let status: Failure | 'answered' = attempt.status;
+    // A 200 the caller cannot use is a failure like any other.
+    if (result.ok && call.accept && !call.accept(result.text ?? '')) {
+      console.error('gemini: unusable reply from', models[i], (result.text ?? '').slice(0, 400));
+      status = 'unusable';
+      result = { ...result, ok: false, error: 'The model sent something unreadable.' };
+    }
+    attempts.push({ model: result.modelVersion ?? models[i], status, usage: result.usage });
+    if (status === 'answered' || last || !worthFallingBack(status)) return settle(result);
+    // Only a failure about the model itself (slow, down, not allowed) skips
+    // it for the next messages; one odd request does not.
+    const bench = worthBenching(status);
+    if (bench) benchModel(models[i]);
+    // The fallback is a second billed request, so it is claimed like one.
+    if (!(await (call.claimFallback ?? claimShadowCall)())) {
+      console.warn(`gemini: ${models[i]} failed (${status}); no fallback, today's cap is spent`);
+      return settle(result);
+    }
+    console.warn(
+      `gemini: ${models[i]} failed (${status}); falling back to ${models[i + 1]}${bench ? ', and skipping it for 10 min' : ' for this call only'}`,
+    );
+  }
+  return settle(result);
+}
+
+/** The default fallback claim: one call from the shadows' shared daily budget. */
+async function claimShadowCall(): Promise<boolean> {
+  const db = admin();
+  if (!db) return false;
+  return (await claimCalls(db, 1)).ok;
+}
+
+/** One call to one model. `status` says how it ended, for the fallback decision. */
+async function geminiOnce(
+  model: string,
+  body: Record<string, unknown>,
+  key: string,
+  grounded: boolean,
+  startedAt: number,
+  timeoutMs: number,
+): Promise<{ result: GeminiResult; status: Failure | 'answered' }> {
+  // Every result names the model it came from, failures included, so a run
+  // log never blames Flash for something the flagship did.
+  // The body is read inside the try too: the time limit covers it, and a
+  // reply that is still arriving when time runs out is a timeout like any
+  // other, which falls back instead of escaping as an unhandled error.
   let res: Response;
+  let raw: string;
   try {
-    res = await fetch(GEMINI_URL, {
+    res = await fetch(geminiUrl(model), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
-    return { ok: false, error: 'The System could not reach the model.', durationMs: Date.now() - startedAt };
+    raw = await res.text();
+  } catch (err) {
+    const timedOut = err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    return {
+      result: { ok: false, error: 'The System could not reach the model.', modelVersion: model, durationMs: Date.now() - startedAt },
+      status: timedOut ? 'timeout' : 'network',
+    };
   }
 
-  const raw = await res.text();
   if (!res.ok) {
-    console.error('gemini error', res.status, raw.slice(0, 600));
-    if (res.status === 429) return { ok: false, error: 'The model is rate limited. Try again in a minute.' };
-    return { ok: false, error: 'The model refused that request.' };
+    console.error('gemini error', model, res.status, raw.slice(0, 600));
+    const error = res.status === 429 ? 'The model is rate limited. Try again in a minute.' : 'The model refused that request.';
+    return { result: { ok: false, error, modelVersion: model }, status: res.status };
   }
+  const result = readEnvelope(raw, model, grounded, startedAt);
+  // A 200 with nothing usable in it (blocked, empty, unreadable) falls back too.
+  return result.ok ? { result, status: 'answered' } : { result: { ...result, modelVersion: model }, status: 'unusable' };
+}
+
+/** Turn a 200 from Gemini into a result. */
+function readEnvelope(raw: string, model: string, grounded: boolean, startedAt: number): GeminiResult {
 
   try {
     const data = JSON.parse(raw) as {
@@ -275,15 +399,16 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
       thoughts: data.usageMetadata?.thoughtsTokenCount ?? 0,
     };
 
+    // A blocked or empty reply is still billed, so its usage is kept.
     if (data.promptFeedback?.blockReason) {
-      return { ok: false, error: 'The model would not answer that. Try rewording the goal.' };
+      return { ok: false, error: 'The model would not answer that. Try rewording the goal.', usage };
     }
 
     const candidate = data.candidates?.[0];
     const text = (candidate?.content?.parts ?? []).map((p) => p.text ?? '').join('');
     if (!text.trim()) {
       console.error('empty candidate', raw.slice(0, 600));
-      return { ok: false, error: 'The model came back empty.' };
+      return { ok: false, error: 'The model came back empty.', usage };
     }
 
     const chunks = candidate?.groundingMetadata?.groundingChunks ?? [];
@@ -294,8 +419,8 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
     return {
       ok: true,
       text,
-      sources: call.grounded ? sources : undefined,
-      modelVersion: data.modelVersion,
+      sources: grounded ? sources : undefined,
+      modelVersion: data.modelVersion ?? model,
       usage,
       durationMs: Date.now() - startedAt,
     };

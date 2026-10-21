@@ -7,8 +7,9 @@ import Animated, { FadeIn, FadeInRight } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
 import { Screen } from '@/components/system/Screen';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, font, palette, radius, space } from '@/constants/theme';
+import { alpha, categoryMeta, icon, palette, radius, space } from '@/constants/theme';
 import {
   AGE_BANDS,
   buildPlan,
@@ -374,9 +375,7 @@ function Choice({
               selected && { borderColor: palette.accent, backgroundColor: palette.accent },
             ]}>
             {selected ? (
-              <SystemText variant="label" color={palette.bg} style={styles.tickMark}>
-                ✓
-              </SystemText>
+              <Icon name="check" size={icon.small} color={palette.bg} />
             ) : null}
           </View>
         </View>
@@ -458,8 +457,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: palette.surface,
     color: palette.text,
-    fontFamily: font.heading,
     fontSize: 22,
+    fontWeight: '700',
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
   },
@@ -480,7 +479,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tickMark: { fontSize: 11, letterSpacing: 0 },
   detail: {
     marginTop: space.md,
     paddingTop: space.md,

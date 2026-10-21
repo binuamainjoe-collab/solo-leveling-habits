@@ -3,8 +3,9 @@ import { StyleSheet, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, palette, radius, space } from '@/constants/theme';
+import { alpha, categoryMeta, HIT, icon, palette, radius, space } from '@/constants/theme';
 import { plannedToQuest } from '@/data/planner';
 import { QUESTS_BY_ID } from '@/data/quests';
 import { isComplete } from '@/data/completion';
@@ -66,11 +67,11 @@ export function MonthCalendar() {
   return (
     <View>
       <View style={styles.header}>
-        <NavButton label="‹" hint="Previous month" onPress={() => shift(-1)} />
+        <NavButton glyph="back" hint="Previous month" onPress={() => shift(-1)} />
         <SystemText variant="title" style={styles.monthLabel}>
           {monthLabel}
         </SystemText>
-        <NavButton label="›" hint="Next month" onPress={() => shift(1)} />
+        <NavButton glyph="chevron" hint="Next month" onPress={() => shift(1)} />
       </View>
 
       <View style={styles.weekRow}>
@@ -181,7 +182,7 @@ export function MonthCalendar() {
   );
 }
 
-function NavButton({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) {
+function NavButton({ glyph, hint, onPress }: { glyph: 'back' | 'chevron'; hint: string; onPress: () => void }) {
   const [pressed, setPressed] = useState(false);
   return (
     <Pressable
@@ -199,9 +200,7 @@ function NavButton({ label, hint, onPress }: { label: string; hint: string; onPr
             transitionDuration: '120ms',
           },
         ]}>
-        <SystemText variant="title" color={palette.text} style={styles.navGlyph}>
-          {label}
-        </SystemText>
+        <Icon name={glyph} size={icon.body} color={palette.text} />
       </Animated.View>
     </Pressable>
   );
@@ -238,13 +237,12 @@ const styles = StyleSheet.create({
   },
   monthLabel: { fontSize: 17 },
   nav: {
-    width: 34,
-    height: 34,
+    width: HIT,
+    height: HIT,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navGlyph: { fontSize: 18, lineHeight: 22 },
   weekRow: { flexDirection: 'row' },
   weekday: { fontSize: 9, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },

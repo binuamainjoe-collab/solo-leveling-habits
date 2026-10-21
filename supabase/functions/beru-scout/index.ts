@@ -30,6 +30,7 @@ import {
   preflight,
   startRun,
 } from '../_shared/agent.ts';
+import { EDGE_LIMIT_MS, joinModels } from '../_shared/models.ts';
 
 const AGENT = 'beru-scout';
 /** One grounded search plus one structuring pass. */
@@ -121,6 +122,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!claim.ok) return claim.response;
 
   const runId = await startRun(db, AGENT);
+  const runStart = Date.now();
 
   // ------------------------------------------------------- 1. grounded search
   const search = await gemini({
@@ -130,8 +132,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     temperature: 0.4,
   });
 
+  // What the search cost, failed or not: a fallback bills both models.
+  const searchSpend = { usage: search.usage, durationMs: search.durationMs, model: search.modelVersion ?? MODEL };
   if (!search.ok || !search.text) {
-    await finishRun(db, runId, 'error', null, search.error ?? 'search failed');
+    await finishRun(db, runId, 'error', null, search.error ?? 'search failed', searchSpend);
     return fail(search.error ?? 'Beru found nothing and came back empty.', 502);
   }
 
@@ -139,7 +143,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // write a confident report of pages it never visited. No sources means no
   // search happened, so the run is abandoned rather than saved.
   if (!search.sources || search.sources.length === 0) {
-    await finishRun(db, runId, 'error', null, 'no grounding metadata — search did not run');
+    await finishRun(db, runId, 'error', null, 'no grounding metadata — search did not run', searchSpend);
     return fail('Beru could not reach the web this time. Nothing was saved. Try again shortly.', 502);
   }
 
@@ -158,15 +162,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     temperature: 0.2,
   });
 
+  // Both model calls are charged to this one run, with every model each one asked.
+  const spend = {
+    usage: addUsage(search.usage, structured.usage),
+    durationMs: (search.durationMs ?? 0) + (structured.durationMs ?? 0),
+    model: joinModels(search.modelVersion, structured.modelVersion) ?? MODEL,
+  };
   if (!structured.ok || !structured.text) {
-    await finishRun(db, runId, 'error', null, structured.error ?? 'structuring failed');
+    await finishRun(db, runId, 'error', null, structured.error ?? 'structuring failed', spend);
     return fail(structured.error ?? 'Beru could not make sense of what it found.', 502);
   }
 
   const parsed = parseJson<{ findings?: RawFinding[] }>(structured.text);
   const rows = Array.isArray(parsed?.findings) ? parsed.findings : [];
   if (rows.length === 0) {
-    await finishRun(db, runId, 'ok', 'nothing worth keeping', null);
+    await finishRun(db, runId, 'ok', 'nothing worth keeping', null, spend);
     return json({ added: 0, skipped: 0, note: 'Beru found nothing worth your time this run.' });
   }
 
@@ -209,19 +219,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .select('id');
     if (insertError) {
       console.error('finding insert failed', insertError.message);
-      await finishRun(db, runId, 'error', null, insertError.message);
+      await finishRun(db, runId, 'error', null, insertError.message, spend);
       return fail('Beru found things but the System could not store them.', 500);
     }
     added = inserted?.length ?? 0;
   }
 
   const summary = `${added} kept, ${skipped} already known`;
-  // Both model calls are charged to this one run.
-  await finishRun(db, runId, 'ok', summary, null, {
-    usage: addUsage(search.usage, structured.usage),
-    durationMs: (search.durationMs ?? 0) + (structured.durationMs ?? 0),
-    model: structured.modelVersion ?? search.modelVersion ?? MODEL,
-  });
+  await finishRun(db, runId, 'ok', summary, null, spend);
 
   // ------------------------------------------------------------ raise Igris
   //
@@ -233,10 +238,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       const base = Deno.env.get('SUPABASE_URL');
       const secret = Deno.env.get('APP_SECRET');
+      // Waited on only while this run is inside the edge function's time
+      // limit; past that, the findings stay saved and "waiting on a ruling".
+      const left = EDGE_LIMIT_MS - 10_000 - (Date.now() - runStart);
       const res = await fetch(`${base}/functions/v1/igris-judge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-app-secret': secret ?? '' },
         body: JSON.stringify({ raisedBy: AGENT }),
+        signal: AbortSignal.timeout(Math.max(1_000, left)),
       });
       judged = res.ok;
       if (!res.ok) console.error('igris refused', res.status, (await res.text()).slice(0, 300));

@@ -6,10 +6,11 @@ import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
+import { Icon } from '@/components/system/Icon';
 import { ReportOverlay } from '@/components/system/ReportOverlay';
 import { Screen } from '@/components/system/Screen';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, font, palette, radius, rankMeta, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, rankMeta, space } from '@/constants/theme';
 import {
   AGENTS,
   latestRuns,
@@ -303,9 +304,12 @@ export default function GoalScreen() {
           {goal ? goal.title.toUpperCase() : 'NO GOAL SET'}
         </SystemText>
         {goal?.deadline ? (
-          <SystemText variant="label" color={palette.gold} style={styles.deadline}>
-            ◷ {goal.deadline} · {deadlineLabel(goal.deadline, today).toUpperCase()}
-          </SystemText>
+          <View style={styles.deadline}>
+            <Icon name="planner" size={icon.small} color={palette.gold} />
+            <SystemText variant="label" color={palette.gold}>
+              {goal.deadline} · {deadlineLabel(goal.deadline, today).toUpperCase()}
+            </SystemText>
+          </View>
         ) : null}
 
         {!configured ? (
@@ -395,7 +399,7 @@ export default function GoalScreen() {
                 ))}
                 {!adding && goals.length < MAX_ACTIVE_GOALS ? (
                   <ActionButton
-                    label="＋ Add a goal"
+                    label="Add a goal"
                     onPress={() => {
                       playSound('tap');
                       setConfirmArchive(null);
@@ -569,7 +573,7 @@ function ShadowCard({
       </SystemText>
 
       {report && onOpenReport ? (
-        <ActionButton label="◉ Read the last report" onPress={onOpenReport} disabled={disabled} primary />
+        <ActionButton label="Read the last report" onPress={onOpenReport} disabled={disabled} primary />
       ) : null}
 
       {agent.summonable ? (
@@ -668,7 +672,7 @@ function FindingCard({
 
       {finding.reason ? (
         <SystemText variant="meta" style={styles.findingReason} numberOfLines={3}>
-          ⚔ {finding.reason}
+          {finding.reason}
         </SystemText>
       ) : null}
 
@@ -682,9 +686,10 @@ function FindingCard({
             accessibilityRole="button"
             accessibilityLabel={`Open ${finding.title}`}>
             <View style={styles.openButton}>
-              <SystemText variant="label" color={palette.text} style={styles.smallLabel}>
-                OPEN ↗
+              <SystemText variant="meta" color={palette.text} style={styles.smallLabel}>
+                Open
               </SystemText>
+              <Icon name="external" size={icon.small} color={palette.text} />
             </View>
           </Pressable>
         ) : null}
@@ -701,11 +706,12 @@ function FindingCard({
               done ? styles.doneButtonOn : null,
               { opacity: disabled ? 0.5 : 1 },
             ]}>
+            {done ? <Icon name="check" size={icon.small} color={palette.bg} /> : null}
             <SystemText
-              variant="label"
+              variant="meta"
               color={done ? palette.bg : palette.text}
               style={styles.smallLabel}>
-              {done ? '✓ DONE' : award > 0 ? `MARK DONE +${award}` : 'MARK DONE'}
+              {done ? 'Done' : award > 0 ? `Mark done +${award}` : 'Mark done'}
             </SystemText>
           </View>
         </Pressable>
@@ -879,7 +885,7 @@ const styles = StyleSheet.create({
   noticeText: { fontSize: 13, lineHeight: 18 },
   loading: { paddingVertical: space.xxl, alignItems: 'center' },
   empty: { fontSize: 12, textAlign: 'center', paddingVertical: space.xl },
-  deadline: { fontSize: 10, letterSpacing: 1.6, marginTop: space.xs },
+  deadline: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.xs },
   inputShort: { minHeight: 0 },
 
   goalCard: { marginBottom: space.sm },
@@ -910,7 +916,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: palette.surface,
     color: palette.text,
-    fontFamily: font.body,
     fontSize: 15,
     lineHeight: 20,
     minHeight: 76,
@@ -949,22 +954,29 @@ const styles = StyleSheet.create({
   findingSummary: { fontSize: 13, lineHeight: 18 },
   findingReason: { fontSize: 11, lineHeight: 16, fontStyle: 'italic', marginTop: 2 },
   findingActions: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xs },
+  // Same shape as a quest card's "Mark done": a 44pt capsule, symbol + label.
   openButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    minHeight: HIT,
     borderWidth: 1,
     borderColor: palette.borderStrong,
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    paddingHorizontal: space.lg,
   },
   doneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    minHeight: HIT,
     borderWidth: 1,
     borderColor: palette.borderStrong,
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+    paddingHorizontal: space.lg,
   },
   doneButtonOn: { backgroundColor: palette.positive, borderColor: palette.positive },
-  smallLabel: { fontSize: 9, letterSpacing: 1.2 },
+  smallLabel: { fontWeight: '600' },
 
   action: {
     flexDirection: 'row',

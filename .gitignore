@@ -51,3 +51,6 @@ expo-qr.png
 
 # local test scripts, not part of the app
 scratch/
+
+# arena skill run files
+.arena/

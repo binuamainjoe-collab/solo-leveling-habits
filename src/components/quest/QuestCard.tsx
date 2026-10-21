@@ -11,8 +11,9 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
+import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, palette, radius, space } from '@/constants/theme';
+import { alpha, categoryMeta, HIT, icon, palette, radius, space } from '@/constants/theme';
 import { feedback, playSound } from '@/lib/feedback';
 import { artFor } from '@/data/cardArt';
 import type { QuestDef } from '@/data/quests';
@@ -160,10 +161,18 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
                 done && { borderColor: palette.positive, backgroundColor: alpha(palette.positive, 0.2) },
                 shut && styles.checkShut,
               ]}>
+              {done || shut ? (
+                <Icon
+                  name={done ? 'check' : 'lock'}
+                  size={icon.small}
+                  color={done ? palette.positive : palette.textFaint}
+                />
+              ) : null}
               <SystemText
-                variant="label"
-                color={done ? palette.positive : shut ? palette.textFaint : palette.textMuted}>
-                {done ? '✓ Done' : shut ? '🔒 Locked' : 'Mark done'}
+                variant="meta"
+                color={done ? palette.positive : shut ? palette.textFaint : palette.text}
+                style={styles.checkLabel}>
+                {done ? 'Done' : shut ? 'Locked' : 'Mark done'}
               </SystemText>
             </View>
           </View>
@@ -172,8 +181,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
         <View>
           {face}
           <View style={styles.footer}>
-            <StepButton label="−" hint="Decrease" onPress={decrease} disabled={value <= 0} />
-            <StepButton label="+" hint="Increase" onPress={increase} accent />
+            <StepButton glyph="minus" hint="Decrease" onPress={decrease} disabled={value <= 0} />
+            <StepButton glyph="plus" hint="Increase" onPress={increase} accent />
           </View>
         </View>
       )}
@@ -246,13 +255,13 @@ function PressSurface({
 }
 
 function StepButton({
-  label,
+  glyph,
   hint,
   onPress,
   disabled,
   accent,
 }: {
-  label: string;
+  glyph: IconName;
   hint: string;
   onPress: () => void;
   disabled?: boolean;
@@ -280,12 +289,7 @@ function StepButton({
             transitionDuration: 110,
           },
         ]}>
-        <SystemText
-          variant="title"
-          color={accent ? palette.bg : palette.text}
-          style={styles.stepGlyph}>
-          {label}
-        </SystemText>
+        <Icon name={glyph} size={icon.bar} color={accent ? palette.bg : palette.text} />
       </Animated.View>
     </Pressable>
   );
@@ -305,16 +309,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
-  chipText: { fontSize: 8, letterSpacing: 0.8 },
-  xp: { fontSize: 9, letterSpacing: 0.6 },
+  chipText: { fontSize: 11 },
+  xp: { fontSize: 13 },
   // Pushes the title to the lower half so the artwork reads above it.
   spacer: { height: 44 },
-  title: { fontSize: 16, lineHeight: 19, letterSpacing: -0.2 },
-  count: { fontSize: 11, marginTop: 2 },
+  title: { fontSize: 17, lineHeight: 22 },
+  count: { marginTop: 2 },
   footer: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   stepWrap: { flex: 1 },
+  // Apple's 44pt minimum: these are the most-tapped controls in the app.
   stepBtn: {
-    height: 32,
+    height: HIT,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -325,11 +330,13 @@ const styles = StyleSheet.create({
     backgroundColor: alpha(palette.bg, 0.55),
   },
   stepBtnAccent: { backgroundColor: palette.accent },
-  stepGlyph: { fontSize: 17, lineHeight: 21 },
   checkShut: { opacity: 0.55 },
+  checkLabel: { fontWeight: '600' },
   checkWide: {
     flex: 1,
-    height: 32,
+    height: HIT,
+    flexDirection: 'row',
+    gap: space.xs,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: palette.borderStrong,
@@ -347,7 +354,7 @@ const styles = StyleSheet.create({
   },
   fill: { height: '100%', width: '100%' },
   xpFloat: { position: 'absolute', right: space.md, top: space.xl },
-  xpFloatText: { fontSize: 14 },
+  xpFloatText: { fontSize: 15 },
 });
 
 export const QuestCard = memo(QuestCardBase);

@@ -13,11 +13,12 @@ import Animated, {
 
 import { QuestCard } from '@/components/quest/QuestCard';
 import { Card } from '@/components/system/Card';
+import { Icon } from '@/components/system/Icon';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { PlanNudge } from '@/components/planner/PlanNudge';
 import { StatusHeader } from '@/components/system/StatusHeader';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, palette, radius, space, type CategoryId } from '@/constants/theme';
+import { alpha, categoryMeta, HIT, icon, palette, radius, space, type CategoryId } from '@/constants/theme';
 import type { QuestDef } from '@/data/quests';
 import { playSound } from '@/lib/feedback';
 import { isCeilingQuest, isComplete, useActiveQuests, useProgress } from '@/store/progress';
@@ -102,12 +103,21 @@ export default function QuestBoardScreen() {
           <Card
             tint={mandatoryDone === mandatory.length ? palette.positive : palette.negative}
             style={styles.warning}>
-            <SystemText
-              variant="title"
-              color={mandatoryDone === mandatory.length ? palette.positive : palette.negative}
-              style={styles.warningTitle}>
-              ⚠ DAILY QUEST — {mandatoryDone === mandatory.length ? 'CLEARED' : 'INCOMPLETE'}
-            </SystemText>
+            <View style={styles.warningHead}>
+              <Icon
+                name={mandatoryDone === mandatory.length ? 'check' : 'warning'}
+                size={icon.body}
+                color={mandatoryDone === mandatory.length ? palette.positive : palette.negative}
+              />
+              {/* The System's announcement: its words and its caps stay. Only the
+                  ⚠ is now drawn as a symbol, at the size of the line. */}
+              <SystemText
+                variant="title"
+                color={mandatoryDone === mandatory.length ? palette.positive : palette.negative}
+                style={styles.warningTitle}>
+                DAILY QUEST — {mandatoryDone === mandatory.length ? 'CLEARED' : 'INCOMPLETE'}
+              </SystemText>
+            </View>
             <SystemText variant="body" style={styles.warningBody}>
               {mandatoryDone === mandatory.length
                 ? 'All mandatory objectives cleared. The penalty zone remains sealed.'
@@ -137,16 +147,14 @@ export default function QuestBoardScreen() {
                     exiting={FadeOut.duration(180)}
                     collapsable={false}>
                     <View style={styles.groupHead}>
+                      {/* The category's own glyph is part of the game's art and stays. */}
                       <SystemText variant="title" color={cat.color} style={styles.groupGlyph}>
                         {cat.glyph}
                       </SystemText>
-                      <SystemText variant="title" color={cat.color} style={styles.groupTitle}>
-                        {cat.label.toUpperCase()}
+                      <SystemText variant="title" style={styles.groupTitle}>
+                        {cat.label}
                       </SystemText>
-                      <View style={[styles.rule, { backgroundColor: alpha(cat.color, 0.3) }]} />
-                      <SystemText variant="label" style={styles.groupCount}>
-                        {quests.length}
-                      </SystemText>
+                      <SystemText variant="meta">{quests.length}</SystemText>
                     </View>
                     <View style={[styles.grid, { gap }]}>
                       {quests.map((q, i) => renderCard(q, groupIndex * 3 + i))}
@@ -189,9 +197,11 @@ export default function QuestBoardScreen() {
           accessibilityRole="button"
           accessibilityLabel="Browse the quest archive">
           <View style={styles.archiveLink}>
-            <SystemText variant="label" color={palette.textMuted} style={styles.archiveLabel}>
-              ☰ BROWSE THE ARCHIVE
+            <Icon name="archive" size={icon.body} color={palette.accent} />
+            <SystemText variant="body" color={palette.text} style={styles.archiveLabel}>
+              Browse the Archive
             </SystemText>
+            <Icon name="chevron" size={icon.small} color={palette.textMuted} />
           </View>
         </Pressable>
       </ScrollView>
@@ -316,18 +326,23 @@ function EmptyPage({ tint, title, body }: { tint: string; title: string; body: s
 const styles = StyleSheet.create({
   scroll: { paddingBottom: space.xxl * 2 },
   warning: { marginBottom: space.lg },
-  warningTitle: { fontSize: 13, letterSpacing: 1.4 },
-  warningBody: { fontSize: 14, lineHeight: 19, marginTop: space.sm },
+  warningHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  warningTitle: { flexShrink: 1, fontWeight: '800', letterSpacing: 0.6 },
+  warningBody: { fontSize: 15, lineHeight: 20, marginTop: space.sm },
 
+  // An inset list row, the way iOS Settings does a link.
   archiveLink: {
     marginTop: space.xl,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radius.pill,
+    minHeight: HIT,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: space.md,
+    backgroundColor: palette.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: space.lg,
     paddingVertical: space.md,
   },
-  archiveLabel: { fontSize: 10, letterSpacing: 1.6 },
+  archiveLabel: { flex: 1 },
   switcher: { flexDirection: 'row', gap: space.sm, marginBottom: space.xl },
   pillWrap: { flex: 1 },
   pill: {
@@ -337,7 +352,8 @@ const styles = StyleSheet.create({
     gap: space.sm,
     borderWidth: 1,
     borderRadius: radius.pill,
-    paddingVertical: 11,
+    // 12 + a 20pt line = Apple's 44pt target.
+    paddingVertical: 12,
   },
   pillLabel: { fontSize: 15 },
   pillCount: {
@@ -347,7 +363,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     alignItems: 'center',
   },
-  pillCountText: { fontSize: 10, letterSpacing: 0 },
+  pillCountText: { fontSize: 11, letterSpacing: 0 },
 
   group: { marginBottom: space.xl },
   groupHead: {
@@ -356,11 +372,9 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginBottom: space.md,
   },
-  groupGlyph: { fontSize: 13 },
-  groupTitle: { fontSize: 11, letterSpacing: 2 },
-  rule: { flex: 1, height: 1 },
-  groupCount: { fontSize: 11 },
+  groupGlyph: { fontSize: 17 },
+  groupTitle: { flex: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
 
-  emptyTitle: { fontSize: 24 },
+  emptyTitle: { fontSize: 22 },
 });

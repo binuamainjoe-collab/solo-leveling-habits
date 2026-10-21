@@ -1,16 +1,26 @@
 import { memo } from 'react';
 import { StyleSheet, Text, type StyleProp, type TextProps, type TextStyle } from 'react-native';
 
-import { font, palette } from '@/constants/theme';
+import { palette, weight } from '@/constants/theme';
+import { resolveType } from '@/data/typeScale';
 
+/**
+ * Every piece of text in the app, on Apple's text-style scale.
+ *
+ * The variants map to iOS text styles. Screens may still ask for a size in
+ * `style`, but it is snapped to the nearest step of the scale (never below
+ * 11pt) and given that step's line height unless the screen sets its own,
+ * and its tracking is kept readable — see src/data/typeScale.ts. No font family is set anywhere, so the text is
+ * the platform's own: SF Pro on Apple devices, Roboto on Android.
+ */
 export type TextVariant =
-  | 'hero' // condensed uppercase slab — "DAY 14", the loudest thing on screen
-  | 'heading' // screen titles — "Your Rating", "Trophy Hall"
-  | 'title' // card titles
-  | 'numeral' // giant right-aligned stat figures
-  | 'label' // tiny letter-spaced uppercase captions
-  | 'body' // running text
-  | 'meta'; // the "↺ Daily · Medium · 5/8" row
+  | 'hero' // Large Title, heavy — the System's announcements: "DAILY QUEST", "PLAN SEALED"
+  | 'heading' // Title 1 — screen titles
+  | 'title' // Headline — card titles
+  | 'numeral' // Large Title figures — level, XP, counts; tabular so they don't jiggle
+  | 'label' // Caption 1, semibold caps — section and status labels
+  | 'body' // Body — running text
+  | 'meta'; // Footnote — the "Daily · Medium · 5/8" row
 
 interface Props extends TextProps {
   variant?: TextVariant;
@@ -21,62 +31,63 @@ interface Props extends TextProps {
 }
 
 function SystemTextBase({ variant = 'body', color, glow, style, ...rest }: Props) {
-  return (
-    <Text
-      {...rest}
-      style={[
-        styles[variant],
-        color ? { color } : null,
-        glow ? { textShadowColor: color ?? palette.accent, textShadowRadius: 18 } : null,
-        style,
-      ]}
-    />
-  );
+  const flat = StyleSheet.flatten([
+    styles[variant],
+    color ? { color } : null,
+    glow ? { textShadowColor: color ?? palette.accent, textShadowRadius: 18 } : null,
+    style,
+  ]);
+  // The variant and the screen's own style are read apart, so a size the
+  // screen changes gets the scale's line height, not the variant's.
+  const own = StyleSheet.flatten(style) ?? {};
+  return <Text maxFontSizeMultiplier={1.6} {...rest} style={[flat, resolveType(styles[variant], own)]} />;
 }
 
 const styles = StyleSheet.create({
   hero: {
-    fontFamily: font.display,
     fontSize: 34,
-    letterSpacing: 0.5,
+    lineHeight: 41,
+    fontWeight: weight.heavy,
     textTransform: 'uppercase',
     color: palette.text,
   },
   heading: {
-    fontFamily: font.heading,
-    fontSize: 26,
-    letterSpacing: -0.4,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: weight.bold,
     color: palette.text,
   },
   title: {
-    fontFamily: font.heading,
     fontSize: 17,
-    letterSpacing: -0.2,
+    lineHeight: 22,
+    fontWeight: weight.semibold,
     color: palette.text,
   },
   numeral: {
-    fontFamily: font.numeral,
-    fontSize: 40,
-    letterSpacing: -1,
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: weight.bold,
+    fontVariant: ['tabular-nums'],
     color: palette.text,
   },
   label: {
-    fontFamily: font.semi,
-    fontSize: 10,
-    letterSpacing: 1.4,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: weight.semibold,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
-    color: palette.textFaint,
+    color: palette.textMuted,
   },
   body: {
-    fontFamily: font.body,
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: weight.regular,
     color: palette.textMuted,
   },
   meta: {
-    fontFamily: font.body,
-    fontSize: 12,
-    letterSpacing: 0.2,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: weight.regular,
     color: palette.textMuted,
   },
 });

@@ -76,6 +76,8 @@ export interface AssistantNow {
     note: string;
   } | null;
   tomorrow: { planned: boolean };
+  /** Today's Google Calendar events, "09:00–10:30 Lecture". Empty when not connected. */
+  calendar: string[];
   screen: string;
 }
 
@@ -95,6 +97,8 @@ export interface NowInput {
   level: number;
   rank: string;
   screen: string;
+  /** Today's calendar lines, from src/lib/calendar.ts. */
+  calendar?: string[];
   now?: Date;
 }
 
@@ -162,6 +166,7 @@ export function buildNow(input: NowInput): AssistantNow {
         }
       : null,
     tomorrow: { planned: Boolean(input.plans[addDays(input.date, 1)]) },
+    calendar: (input.calendar ?? []).slice(0, 18),
     screen: input.screen,
   };
 }

@@ -14,8 +14,9 @@ export const palette = {
   surfaceRaised: '#232327',
   surfaceHover: '#2B2B30',
 
-  border: 'rgba(255,255,255,0.08)',
-  borderStrong: 'rgba(255,255,255,0.16)',
+  /** Hairlines, not frames: Apple separates with space and fill first. */
+  border: 'rgba(255,255,255,0.06)',
+  borderStrong: 'rgba(255,255,255,0.14)',
 
   /** The one loud colour. Used sparingly — a level badge, one CTA, the streak. */
   accent: '#FF6A00',
@@ -126,16 +127,29 @@ export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 /** Generous rounding is central to the look — nothing here is sharp. */
 export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
 
-export const font = {
-  /** Heavy condensed grotesque, uppercase only — hero lines and the day counter. */
-  display: 'Anton_400Regular',
-  /** The giant right-aligned stat numerals. */
-  numeral: 'ArchivoBlack_400Regular',
-  heading: 'Outfit_700Bold',
-  semi: 'Outfit_600SemiBold',
-  body: 'Outfit_500Medium',
-  regular: 'Outfit_400Regular',
+/**
+ * Type follows Apple: one family — the platform's own (SF Pro on iPhone and
+ * Mac, Roboto on Android) — and hierarchy from size and weight alone, on the
+ * iOS text-style scale in src/data/typeScale.ts. SystemText applies it; no
+ * screen sets a font family.
+ */
+export const weight = {
+  regular: '400',
+  medium: '500',
+  semibold: '600',
+  bold: '700',
+  heavy: '800',
 } as const;
+
+/**
+ * Icon sizes, from Apple's guidance: a tab bar glyph is about 25pt, a
+ * toolbar or navigation glyph 22pt, and an icon inside a line of text
+ * matches that text (17pt body, 13pt footnote).
+ */
+export const icon = { tab: 25, bar: 22, body: 17, small: 13 } as const;
+
+/** Apple's minimum hit target. Anything tappable is at least this tall. */
+export const HIT = 44;
 
 /** Breakpoint above which the layout goes multi-column (tablet / desktop web). */
 export const WIDE = 760;

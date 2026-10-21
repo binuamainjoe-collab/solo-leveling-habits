@@ -13,14 +13,30 @@
  * back looking confident.
  *
  * Self-contained on purpose: the agents share `_shared/agent.ts` and are
- * paused, and the planner should not move when they do.
+ * paused, and the planner should not move when they do. It takes only the
+ * model choice from `_shared/models.ts`, which has no I/O of its own: the
+ * planner runs on the deep model, with Flash behind it.
  */
 
-/** The current Flash model, per ai.google.dev/gemini-api/docs/models. */
-const MODEL = 'gemini-3.8-flash';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+import {
+  type Attempt,
+  attemptTimeout,
+  benchModel,
+  billedUsage,
+  CHAT_BUDGET_MS,
+  DEEP_TIMEOUT_MS,
+  type Failure,
+  geminiUrl,
+  modelsFor,
+  runModel,
+  worthBenching,
+  worthFallingBack,
+} from '../_shared/models.ts';
 
-/** Planner messages per UTC day — a separate pool from the agents' 30. */
+/**
+ * Planner model calls per UTC day — a separate pool from the agents' 30.
+ * One per message, plus one when the flagship failed and Flash was asked.
+ */
 const PLANNER_CAP = 60;
 
 const MAX_MESSAGES = 40;
@@ -32,7 +48,7 @@ const SYSTEM = `You are The System — the planning voice inside a Solo Leveling
 THE CONVERSATION
 - You lead, gently. Ask exactly ONE short question per reply. A reply containing two questions is wrong — if you need two things, ask the more important one now and the other later.
 - Find out, in this order, skipping anything already known from CONTEXT or the chat:
-  1. What is fixed that day — classes, work, appointments, travel — and when.
+  1. What is fixed that day — classes, work, appointments, travel — and when. The timed lines under "Calendar" in CONTEXT are already known: do not ask about them; ask only whether anything else is fixed.
   2. What they want to get done.
   3. When they wake and sleep — only if CONTEXT says unknown.
 - Never ask the same thing twice. If the student skips a question, assume a sensible answer, say in a few words what you assumed, and move on. If wake and sleep are unknown, draft with 07:30 and 23:00 until told otherwise.
@@ -59,6 +75,8 @@ THE TIMELINE
   habit — one of their DAILY QUESTS placed at a time. Set quest_id to that quest's id exactly, and title to the quest's name. Put what the session is for today in focus — "Stats exam: formula sheet" on a study quest — and keep an existing focus unless the student changes it. Only place quests that happen at a time, such as a workout, a study session, or reading. Leave all-day quests like water, steps or posture unplaced — the app shows those separately.
   break — deliberate rest.
 - Never overlap two blocks. Never place anything outside wake to sleep. Under-fill rather than over-fill: assume the day will not go to plan.
+- CALENDAR lines in CONTEXT: each timed line ("09:00–10:30 Lecture") is one fixed block at exactly those times. Code has already merged overlaps and cut every timed line to the waking hours, so place each one as given (title without the bracketed note). Lines starting "outside waking hours:" are never blocks: if one matters (an early train), mention it in the note or ask whether to move wake. Lines starting "all day:" are context about the day (an exam week, a holiday), never a block.
+- Lines starting "to do" are the student's open Google Tasks. They are candidates for task blocks under the same rules as any task, never fixed blocks; prefer overdue and due ones, offer them in one short line, and add only what fits.
 - Give a task a concrete first move in its title where it helps starting: "Stats: one formula sheet + 2 problems", not "Study stats".
 - Estimate time honestly, including getting started. Split anything over 90 minutes into separately named parts.
 - When you keep a block from the current draft, keep its id exactly. New blocks have an empty id.
@@ -177,6 +195,11 @@ function contextBlock(raw: unknown): string {
     ? c.openLoops.map((t) => str(t, 80)).filter(Boolean).slice(0, 10)
     : [];
 
+  // The day's Google Calendar, read by the app with the student's sign-in.
+  const calendar = Array.isArray(c.calendar)
+    ? c.calendar.map((e) => str(e, 100)).filter(Boolean).slice(0, 18)
+    : [];
+
   let draft = 'none yet';
   if (c.draft && typeof c.draft === 'object') {
     const d = JSON.stringify(c.draft);
@@ -193,6 +216,9 @@ function contextBlock(raw: unknown): string {
     `Study methods they use: ${methods.join(', ') || 'none given'}`,
     'Daily quests (id — title — target (kind)):',
     quests.length ? quests.join('\n') : '  none',
+    calendar.length
+      ? `Calendar and open Google Tasks for that day:\n${calendar.map((e) => `  ${e}`).join('\n')}`
+      : 'Calendar for that day: not connected or empty — ask what is fixed.',
     `Open loops (left unfinished): ${loops.length ? loops.join('; ') : 'none'}`,
     `Current draft: ${draft}`,
   ].join('\n');
@@ -334,9 +360,48 @@ async function knowledge(today: string): Promise<string> {
     .join('\n');
 }
 
+/**
+ * Whether a 200 from Gemini holds what the code below accepts: no blocked
+ * prompt, and a candidate whose text is JSON with a non-empty reply.
+ */
+function usableReply(raw: string): boolean {
+  try {
+    const data = JSON.parse(raw) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      promptFeedback?: { blockReason?: string };
+    };
+    if (data.promptFeedback?.blockReason) return false;
+    const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    const out = JSON.parse(text) as { reply?: unknown };
+    return typeof out.reply === 'string' && out.reply.trim() !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The tokens one attempt reported. A request that was answered at all
+ * (even with an error or an unusable 200) may carry usageMetadata; one that
+ * timed out or lost its connection reported nothing.
+ */
+function usageOf(raw: string, failure: Failure | null): Attempt['usage'] {
+  if (failure === 'timeout' || failure === 'network') return undefined;
+  try {
+    const u = (JSON.parse(raw) as {
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+    }).usageMetadata;
+    if (!u) return undefined;
+    return { in: u.promptTokenCount ?? 0, out: u.candidatesTokenCount ?? 0, thoughts: u.thoughtsTokenCount ?? 0 };
+  } catch {
+    return undefined;
+  }
+}
+
 /* ---------------------------------------------------------------- serve */
 
 Deno.serve(async (req: Request): Promise<Response> => {
+  // The app stops waiting 45 s after it sent this (src/data/planner.ts).
+  const requestStart = Date.now();
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return fail('Use POST.', 405);
 
@@ -378,40 +443,84 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .filter(Boolean)
     .join('\n\n');
 
+  const request = JSON.stringify({
+    systemInstruction: { parts: [{ text: system }] },
+    contents,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: RESPONSE_SCHEMA,
+      temperature: 0.6,
+      // 'low' rather than the default: a chat reply that takes thirteen
+      // seconds is a chat nobody finishes. 'minimal' is not offered on
+      // gemini-4-argon or 3.8 Flash and errors.
+      thinkingConfig: { thinkingLevel: 'low' },
+    },
+  });
+
+  // The deep model first; Flash if it is missing, refused, busy or slow.
+  // The fallback is a second billed request, so it claims a second place in
+  // today's budget before it is sent.
+  const models = modelsFor('deep', (name) => Deno.env.get(name));
   const startedAt = Date.now();
-  let res: Response;
-  try {
-    res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents,
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0.6,
-          // 'low' rather than the default: a chat reply that takes thirteen
-          // seconds is a chat nobody finishes. 'minimal' is not offered on
-          // 3.8 Flash and errors.
-          thinkingConfig: { thinkingLevel: 'low' },
-        },
-      }),
-    });
-  } catch {
-    return fail('The System could not reach the model. Check your connection and try again.', 502);
+  const attempts: Attempt[] = [];
+  let res: Response | null = null;
+  let raw = '';
+  for (let i = 0; i < models.length; i++) {
+    const last = i === models.length - 1;
+    let failure: Failure | null = null;
+    // Both attempts share one budget, so Flash cannot run past the app's 45 s.
+    const timeoutMs = attemptTimeout(last, DEEP_TIMEOUT_MS.chat, CHAT_BUDGET_MS - (Date.now() - requestStart));
+    try {
+      res = await fetch(geminiUrl(models[i]), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+        body: request,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      raw = await res.text();
+      if (!res.ok) {
+        console.error('gemini error', models[i], res.status, raw.slice(0, 600));
+        failure = res.status;
+      } else if (!last && !usableReply(raw)) {
+        // A 200 this function would reject below (blocked, empty, not the
+        // JSON asked for) is asked of Flash instead of failing the turn.
+        console.error('planner: unusable reply from', models[i], raw.slice(0, 600));
+        failure = 'unusable';
+      }
+    } catch (err) {
+      res = null;
+      failure = err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout' : 'network';
+    }
+    attempts.push({ model: models[i], status: failure ?? 'answered', usage: usageOf(raw, failure) });
+    if (failure === null) {
+      // Which model drafted this plan, for the function log.
+      console.info(`planner: answered by ${models[i]}`);
+      break;
+    }
+    if (last || !worthFallingBack(failure)) break;
+    // Only a failure about the model itself (slow, down, not allowed) makes
+    // the next turns skip it for a while; one odd request does not.
+    const bench = worthBenching(failure);
+    if (bench) benchModel(models[i]);
+    if (!(await claimCall()).ok) {
+      console.warn(`planner: ${models[i]} failed (${failure}); no fallback, today's budget is spent`);
+      break;
+    }
+    console.warn(
+      `planner: ${models[i]} failed (${failure}); falling back to ${models[i + 1]}${bench ? ', and skipping it for 10 min' : ' for this turn only'}`,
+    );
   }
 
-  const raw = await res.text();
+  if (!res) {
+    return fail('The System could not reach the model. Check your connection and try again.', 502);
+  }
   if (!res.ok) {
-    console.error('gemini error', res.status, raw.slice(0, 600));
     if (res.status === 429) return fail('The model is busy right now. Try again in a moment.', 429);
     return fail('The model refused that. Try saying it another way.', 502);
   }
 
   let text = '';
   let modelVersion: string | null = null;
-  let usage = { in: 0, out: 0, thoughts: 0 };
   try {
     const data = JSON.parse(raw) as {
       candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
@@ -427,11 +536,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return fail('The model would not answer that. Try saying it another way.', 502);
     }
     modelVersion = data.modelVersion ?? null;
-    usage = {
-      in: data.usageMetadata?.promptTokenCount ?? 0,
-      out: data.usageMetadata?.candidatesTokenCount ?? 0,
-      thoughts: data.usageMetadata?.thoughtsTokenCount ?? 0,
-    };
     text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
   } catch {
     console.error('unparseable gemini envelope', raw.slice(0, 600));
@@ -455,9 +559,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     suggestions: Array.isArray(out.suggestions) ? out.suggestions : [],
     wants_finalize: out.wants_finalize === true,
     draft: out.draft ?? null,
-    // For diagnosis only; the app does not need it.
-    model_version: modelVersion,
+    // For diagnosis only; the app does not need it. After a fallback both
+    // models are named, and the usage is every attempt's together.
+    model_version: attempts.length > 1 ? runModel(attempts) : modelVersion,
     ms: Date.now() - startedAt,
-    usage,
+    usage: billedUsage(attempts),
   });
 });

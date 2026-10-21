@@ -4,8 +4,9 @@ import { Pressable } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, space, WIDE } from '@/constants/theme';
+import { alpha, icon, palette, space, WIDE } from '@/constants/theme';
 import { playSound } from '@/lib/feedback';
 
 // `hunter` rather than `status`: Metro's dev server serves its own /status
@@ -20,12 +21,13 @@ import { playSound } from '@/lib/feedback';
 // what you do, and when. Cards and Trophies share Collection to make room —
 // both are things earned, neither is something you act on daily.
 const TABS = [
-  { name: 'index', label: 'QUESTS', glyph: '⚔' },
-  { name: 'planner', label: 'PLANNER', glyph: '◷' },
-  { name: 'goal', label: 'GOAL', glyph: '◆' },
-  { name: 'collection', label: 'COLLECTION', glyph: '◈' },
-  { name: 'hunter', label: 'STATUS', glyph: '◉' },
-] as const;
+  { name: 'index', label: 'Quests', icon: 'quests' },
+  { name: 'planner', label: 'Planner', icon: 'planner' },
+  // The goal keeps the System's own mark, drawn as text like the ◆ button.
+  { name: 'goal', label: 'Goal', mark: '◆' },
+  { name: 'collection', label: 'Collection', icon: 'collection' },
+  { name: 'hunter', label: 'Status', icon: 'status' },
+] as const satisfies readonly ({ name: string; label: string } & ({ icon: IconName } | { mark: string }))[];
 
 export default function TabsLayout() {
   return (
@@ -59,10 +61,12 @@ interface TabBarProps {
 }
 
 /**
- * A console strip rather than a platform tab bar. It stays docked at the
- * bottom on every size — this navigator has no option to reposition it, and a
- * bottom HUD strip suits the System's look on desktop too. Past the WIDE
- * breakpoint the triggers stop stretching and centre instead.
+ * An Apple-style tab bar: an outlined symbol over a short label, the
+ * selected tab in the accent, the rest in grey, a hairline above. The
+ * System's touch stays: the accent underline still slides in over the
+ * selected tab and the tab fades up, so every tap still animates
+ * (principle 10). It stays docked at the bottom on every size; past the
+ * WIDE breakpoint the tabs stop stretching and centre instead.
  */
 function SystemTabBar({ state, navigation }: TabBarProps) {
   const { width } = useWindowDimensions();
@@ -70,12 +74,13 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
   const wide = width >= WIDE;
 
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
+    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.xs) }]}>
       <View style={[styles.barInner, wide && styles.barInnerWide]}>
         {state.routes.map((route, index) => {
           const meta = TABS.find((t) => t.name === route.name);
           if (!meta) return null;
           const focused = state.index === index;
+          const tint = focused ? palette.accent : palette.textMuted;
 
           return (
             <Pressable
@@ -99,7 +104,6 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
                   style={[
                     styles.indicator,
                     {
-                      backgroundColor: palette.accent,
                       transform: [{ scaleX: focused ? 1 : 0 }],
                       transformOrigin: 'center center',
                       transitionProperty: 'transform',
@@ -109,21 +113,18 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
                   ]}
                 />
                 <Animated.View
-                  style={{
-                    opacity: focused ? 1 : 0.45,
-                    transitionProperty: 'opacity',
-                    transitionDuration: 200,
-                  }}>
-                  <SystemText
-                    variant="title"
-                    color={focused ? palette.accent : palette.textMuted}
-                    style={styles.glyph}>
-                    {meta.glyph}
-                  </SystemText>
-                  <SystemText
-                    variant="label"
-                    color={focused ? palette.accent : palette.textFaint}
-                    style={styles.label}>
+                  style={[
+                    styles.tabContent,
+                    { opacity: focused ? 1 : 0.7, transitionProperty: 'opacity', transitionDuration: 200 },
+                  ]}>
+                  {'icon' in meta ? (
+                    <Icon name={meta.icon} size={icon.tab} color={tint} />
+                  ) : (
+                    <SystemText variant="title" color={tint} style={styles.mark}>
+                      {meta.mark}
+                    </SystemText>
+                  )}
+                  <SystemText variant="meta" color={tint} numberOfLines={1} style={styles.label}>
                     {meta.label}
                   </SystemText>
                 </Animated.View>
@@ -139,17 +140,19 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
 const styles = StyleSheet.create({
   scene: { backgroundColor: palette.bg },
   bar: {
-    backgroundColor: alpha(palette.surface, 0.96),
-    paddingTop: space.sm,
-    borderTopWidth: 1,
-    borderTopColor: alpha(palette.accent, 0.22),
+    backgroundColor: alpha(palette.surface, 0.94),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.borderStrong,
   },
   barInner: { flexDirection: 'row' },
   barInnerWide: { maxWidth: 720, width: '100%', alignSelf: 'center' },
   tab: { flex: 1 },
-  tabWide: { flex: 0, minWidth: 140 },
-  tabInner: { alignItems: 'center', paddingVertical: space.xs, gap: 2 },
-  indicator: { position: 'absolute', top: -space.sm, height: 2, width: '55%' },
-  glyph: { fontSize: 16, textAlign: 'center' },
-  label: { fontSize: 8, letterSpacing: 1.1, textAlign: 'center' },
+  tabWide: { flex: 0, minWidth: 120 },
+  // 49pt is the iOS tab bar height; the symbol and label sit centred in it.
+  tabInner: { height: 49, alignItems: 'center', justifyContent: 'center' },
+  tabContent: { alignItems: 'center', gap: 2 },
+  // ◆ set to the same 25pt box as the symbols beside it.
+  mark: { fontSize: 22, lineHeight: 25, height: 25, textAlign: 'center' },
+  indicator: { position: 'absolute', top: 0, height: 2, width: '40%', borderRadius: 1, backgroundColor: palette.accent },
+  label: { fontSize: 11, fontWeight: '500', textAlign: 'center' },
 });

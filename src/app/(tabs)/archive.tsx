@@ -5,11 +5,14 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { Card } from '@/components/system/Card';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
 import {
   alpha,
   categoryMeta,
   BROWSABLE_CATEGORIES,
+  HIT,
+  icon,
   palette,
   radius,
   rankMeta,
@@ -199,8 +202,9 @@ const ArchiveCard = memo(function ArchiveCard({
               backgroundColor: accepted ? alpha(palette.positive, 0.12) : 'transparent',
             },
           ]}>
+          <Icon name={accepted ? 'check' : 'plus'} size={icon.small} color={accepted ? palette.positive : cat.color} />
           <SystemText variant="label" color={accepted ? palette.positive : cat.color}>
-            {accepted ? '✓ ON BOARD — TAP TO REMOVE' : '+ ACCEPT QUEST'}
+            {accepted ? 'On board — tap to remove' : 'Accept quest'}
           </SystemText>
         </RectButton>
       </Card>
@@ -236,11 +240,13 @@ const styles = StyleSheet.create({
   cardRank: { fontSize: 12 },
   cardMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm },
   accept: {
+    flexDirection: 'row',
+    gap: space.xs,
+    minHeight: HIT,
     borderWidth: 1,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: space.sm,
     marginTop: space.md,
   },
 });

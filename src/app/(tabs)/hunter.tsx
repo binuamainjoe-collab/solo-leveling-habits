@@ -229,7 +229,7 @@ export default function HunterScreen() {
             />
             {plannerConfigured() ? (
               <GhostButton
-                label="◷ Open the Planner"
+                label="Open the Planner"
                 onPress={() => {
                   playSound('tap');
                   router.push('/planner');
@@ -384,7 +384,7 @@ function AccountBlock() {
             {accounts.length > 1 ? ` ${accounts.length} accounts linked on this device.` : ''}
           </SystemText>
           <GhostButton
-            label={accounts.length > 1 ? '⇄ Switch account' : '＋ Link another account'}
+            label={accounts.length > 1 ? 'Switch account' : 'Link another account'}
             onPress={() => {
               playSound('tap');
               router.push('/signin');
@@ -407,7 +407,7 @@ function AccountBlock() {
             and the browser, and to let the briefing plan around your calendar.
           </SystemText>
           <GhostButton
-            label="▶ Sign in with Google"
+            label="Sign in with Google"
             onPress={() => {
               playSound('tap');
               router.push('/signin');
@@ -505,7 +505,7 @@ function DangerButton({ onPress }: { onPress: () => void }) {
           },
         ]}>
         <SystemText variant="label" color={palette.negative}>
-          ⟲ Reset all progress
+          Reset all progress
         </SystemText>
       </Animated.View>
     </Pressable>

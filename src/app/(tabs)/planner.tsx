@@ -131,7 +131,7 @@ export default function PlannerScreen() {
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <SystemText variant="label" color={palette.textMuted} style={styles.kicker}>
-          ◷ PLANNER
+          Planner
         </SystemText>
         <SystemText variant="hero" style={styles.hero}>
           {weekdayOf(date).toUpperCase()}

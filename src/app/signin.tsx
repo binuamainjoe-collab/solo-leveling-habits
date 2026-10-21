@@ -8,8 +8,9 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
 import { Screen } from '@/components/system/Screen';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
 import {
   forgetAccount,
   listAccounts,
@@ -223,9 +224,7 @@ function AccountRow({
         accessibilityRole="button"
         accessibilityLabel={`Remove ${account.email} from this device`}>
         <View style={styles.forget}>
-          <SystemText variant="label" color={palette.textMuted} style={styles.forgetText}>
-            ✕
-          </SystemText>
+          <Icon name="close" size={icon.body} color={palette.textMuted} />
         </View>
       </Pressable>
     </Card>
@@ -300,8 +299,8 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0 },
   rowName: { fontSize: 15 },
   rowEmail: { fontSize: 11, marginTop: 1 },
-  forget: { paddingHorizontal: space.md, paddingVertical: space.md },
-  forgetText: { fontSize: 13 },
+  // 44pt square, Apple's minimum target, for the small ✕ beside each account.
+  forget: { minWidth: HIT, minHeight: HIT, alignItems: 'center', justifyContent: 'center' },
 
   action: {
     flexDirection: 'row',

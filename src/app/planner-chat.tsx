@@ -15,8 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChatError, Composer, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
 import { Timeline } from '@/components/planner/Timeline';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
+import { fitCalendar } from '@/data/calendar';
 import {
   isResumable,
   isStale,
@@ -37,6 +39,7 @@ import {
   type DailyQuestRef,
   type DraftPlan,
 } from '@/data/timeline';
+import { calendarFor } from '@/lib/calendar';
 import { feedback, playSound } from '@/lib/feedback';
 import { clearSession, loadSession, saveSession } from '@/lib/plannerSession';
 import { ACCEPT_PLAN_XP, useProgress, useQuestLookup } from '@/store/progress';
@@ -139,6 +142,14 @@ export default function PlannerChatScreen() {
     if (sealed) void clearSession();
   }, [sealed]);
 
+  // Start reading the planned day's calendar as soon as the chat opens.
+  // Every turn then awaits the same cached read (src/lib/calendar.ts), so
+  // even the first message carries it. Empty when Google is not connected,
+  // and the System simply asks what is fixed.
+  useEffect(() => {
+    void calendarFor(date);
+  }, [date]);
+
   // Keep the newest line in view when the keyboard opens.
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
@@ -149,7 +160,7 @@ export default function PlannerChatScreen() {
 
   /* ------------------------------------------------------------ talking */
 
-  function contextFor(current: DraftPlan | null): PlannerContext {
+  function contextFor(current: DraftPlan | null, calendar: string[]): PlannerContext {
     return {
       date,
       weekday,
@@ -161,6 +172,14 @@ export default function PlannerChatScreen() {
       studyMethods: state.profile?.studyMethods ?? [],
       dailyQuests,
       openLoops: date === today ? [] : openLoops(state.plans[today]?.timeline?.blocks, state.values),
+      // Cut to the waking hours the draft (or the settings) uses, so every
+      // timed line the System places as a fixed block passes validateDraft.
+      // 07:30 / 23:00 are the planner prompt's own defaults.
+      calendar: fitCalendar(
+        calendar,
+        current?.wake ?? state.settings.wake ?? '07:30',
+        current?.sleep ?? state.settings.sleep ?? '23:00',
+      ),
       draft: current,
     };
   }
@@ -181,7 +200,7 @@ export default function PlannerChatScreen() {
   /** Ask for the next turn. Separate from send() so a failed turn can be retried. */
   async function ask(history: ChatMessage[]) {
     setBusy('thinking');
-    const res = await sendPlannerMessage(history, contextFor(draft));
+    const res = await sendPlannerMessage(history, contextFor(draft, await calendarFor(date)));
 
     if (!res.ok || !res.data) {
       setBusy(null);
@@ -221,7 +240,7 @@ export default function PlannerChatScreen() {
 
     if (!check.ok) {
       setBusy('sealing');
-      const res = await sendPlannerMessage(history, contextFor(plan), check.violations);
+      const res = await sendPlannerMessage(history, contextFor(plan, await calendarFor(date)), check.violations);
       if (res.ok && res.data) {
         const repaired = normaliseDraft(res.data.draft, dailyQuests).draft;
         if (repaired.blocks.length > 0) {
@@ -284,14 +303,12 @@ export default function PlannerChatScreen() {
       <View style={styles.header}>
         <Pressable onPress={leave} accessibilityRole="button" accessibilityLabel="Back to the planner">
           <View style={styles.back}>
-            <SystemText variant="title" color={palette.text} style={styles.backGlyph}>
-              ‹
-            </SystemText>
+            <Icon name="back" size={icon.bar} color={palette.text} />
           </View>
         </Pressable>
         <View style={styles.headerText}>
           <SystemText variant="label" color={palette.textMuted} style={styles.headerKicker}>
-            ◷ PLANNING
+            Planning
           </SystemText>
           <SystemText variant="title" numberOfLines={1} style={styles.headerTitle}>
             {date === today ? 'Today' : weekday}
@@ -451,8 +468,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: palette.border,
   },
-  back: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  backGlyph: { fontSize: 28, lineHeight: 30 },
+  back: { width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, minWidth: 0 },
   headerKicker: { fontSize: 9, letterSpacing: 2 },
   headerTitle: { fontSize: 17, lineHeight: 21 },

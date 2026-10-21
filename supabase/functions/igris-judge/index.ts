@@ -149,15 +149,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     temperature: 0.3,
   });
 
+  // What the call cost, failed or not: a fallback bills both models.
+  const spend = { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL };
   if (!result.ok || !result.text) {
-    await finishRun(db, runId, 'error', null, result.error ?? 'judging failed');
+    await finishRun(db, runId, 'error', null, result.error ?? 'judging failed', spend);
     return fail(result.error ?? 'Igris could not reach a ruling.', 502);
   }
 
   const parsed = parseJson<{ rulings?: Ruling[] }>(result.text);
   const rulings = Array.isArray(parsed?.rulings) ? parsed.rulings : [];
   if (rulings.length === 0) {
-    await finishRun(db, runId, 'error', null, 'model returned no rulings');
+    await finishRun(db, runId, 'error', null, 'model returned no rulings', spend);
     return fail('Igris returned nothing. The findings are still there, unjudged.', 502);
   }
 
@@ -205,7 +207,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     judged > 0 ? 'ok' : 'error',
     summary,
     judged > 0 ? null : 'no rulings applied',
-    { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL },
+    spend,
   );
 
   return json({ judged, mustRead });

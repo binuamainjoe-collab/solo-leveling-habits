@@ -4,8 +4,9 @@ import { StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, icon, palette, radius, space } from '@/constants/theme';
 import { tierMeta, type AchievementDef } from '@/data/achievements';
 
 interface Props {
@@ -90,9 +91,16 @@ function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props)
               ]}
             />
           ) : null}
-          <SystemText variant="heading" style={[styles.glyph, !unlocked && styles.glyphLocked]}>
-            {hidden ? '?' : unlocked ? a.glyph : '🔒'}
-          </SystemText>
+          {/* The trophy's own glyph is its art and stays; the lock is a symbol. */}
+          {!hidden && !unlocked ? (
+            <View style={styles.glyphLocked}>
+              <Icon name="lock" size={icon.tab} color={palette.textMuted} />
+            </View>
+          ) : (
+            <SystemText variant="heading" style={[styles.glyph, !unlocked && styles.glyphLocked]}>
+              {hidden ? '?' : a.glyph}
+            </SystemText>
+          )}
         </View>
 
         <View style={styles.body}>
@@ -122,9 +130,12 @@ function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props)
 
           {unlocked ? (
             <View style={styles.unlockedRow}>
-              <SystemText variant="label" color={palette.positive}>
-                ✓ Unlocked
-              </SystemText>
+              <View style={styles.unlockedTag}>
+                <Icon name="check" size={icon.small} color={palette.positive} />
+                <SystemText variant="label" color={palette.positive}>
+                  Unlocked
+                </SystemText>
+              </View>
               <SystemText variant="label" color={palette.accent}>
                 +{a.xp.toLocaleString('en-US')} XP
               </SystemText>
@@ -133,7 +144,7 @@ function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props)
             // A hidden objective shows no bar: revealing progress toward a
             // secret would give the secret away.
             <SystemText variant="label" color={alpha(tier.color, 0.75)} style={styles.hiddenNote}>
-              ✦ Discover to reveal
+              Discover to reveal
             </SystemText>
           ) : (
             <View style={styles.progressWrap}>
@@ -203,6 +214,7 @@ const styles = StyleSheet.create({
   },
   requirement: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   unlockedRow: { flexDirection: 'row', gap: space.lg, marginTop: space.sm },
+  unlockedTag: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   hiddenNote: { marginTop: space.sm },
   progressWrap: { marginTop: space.sm, gap: space.xs },
   track: {

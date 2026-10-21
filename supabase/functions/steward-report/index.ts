@@ -45,6 +45,7 @@ import {
   type Narration,
   type SnapshotFact,
 } from '../_shared/steward.ts';
+import { joinModels } from '../_shared/models.ts';
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
@@ -60,6 +61,7 @@ interface RunRow {
   tokens_in: number | null;
   tokens_out: number | null;
   tokens_thoughts: number | null;
+  model: string | null;
 }
 
 /**
@@ -75,7 +77,7 @@ async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
   const [runsRes, usageRes, goalRes, findingsRes, snapsRes] = await Promise.all([
     db
       .from('agent_runs')
-      .select('agent, status, error, duration_ms, tokens_in, tokens_out, tokens_thoughts')
+      .select('agent, status, error, duration_ms, tokens_in, tokens_out, tokens_thoughts, model')
       .gte('started_at', since),
     db.from('usage').select('calls').eq('day', date).maybeSingle(),
     db.from('goals').select('title').eq('focus', true).maybeSingle(),
@@ -122,6 +124,9 @@ async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
     a.tokens_in += r.tokens_in ?? 0;
     a.tokens_out += r.tokens_out ?? 0;
     a.tokens_thoughts += r.tokens_thoughts ?? 0;
+    // Priced per run: one agent can run on the deep model one day and fall
+    // back to Flash the next, and the two cost very different amounts.
+    a.cost_usd += costUsd(r.tokens_in ?? 0, r.tokens_out ?? 0, r.tokens_thoughts ?? 0, r.model);
     // Accumulate then divide once, below.
     a.avg_duration_ms += r.duration_ms ?? 0;
     byAgent.set(r.agent, a);
@@ -130,7 +135,7 @@ async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
   const agents = [...byAgent.values()].map((a) => ({
     ...a,
     avg_duration_ms: a.runs > 0 ? Math.round(a.avg_duration_ms / a.runs) : 0,
-    cost_usd: costUsd(a.tokens_in, a.tokens_out, a.tokens_thoughts),
+    cost_usd: Math.round(a.cost_usd * 10_000) / 10_000,
   }));
 
   const callsToday = (usageRes.data?.calls as number | undefined) ?? 0;
@@ -185,15 +190,18 @@ async function narrate(
     thinkingLevel: 'low',
   });
 
+  // A failed call was still billed (the flagship, then Flash), so its
+  // tokens and models are reported either way.
+  const tokens = result.usage ? { in: result.usage.in, out: result.usage.out, thoughts: result.usage.thoughts } : undefined;
   if (!result.ok || !result.text) {
-    return { narration: null, error: result.error, durationMs: result.durationMs };
+    return { narration: null, error: result.error, durationMs: result.durationMs, modelVersion: result.modelVersion, tokens };
   }
 
   return {
     narration: parseNarration(parseJson<unknown>(result.text)),
     modelVersion: result.modelVersion,
     durationMs: result.durationMs,
-    tokens: result.usage ? { in: result.usage.in, out: result.usage.out, thoughts: result.usage.thoughts } : undefined,
+    tokens,
   };
 }
 
@@ -319,7 +327,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const out = await narrate(facts, violations);
       durationMs += out.durationMs ?? 0;
-      if (out.modelVersion) modelVersion = out.modelVersion;
+      // Both attempts' models, so a retry on another model is priced as both.
+      modelVersion = joinModels(modelVersion, out.modelVersion);
       if (out.tokens) {
         tokens = {
           in: tokens.in + out.tokens.in,

@@ -32,8 +32,13 @@ import {
   preflight,
   startRun,
 } from '../_shared/agent.ts';
+import { APP_TIMEOUT_MS, CHAT_BUDGET_MS, DEEP_TIMEOUT_MS } from '../_shared/models.ts';
 
-/** Assistant messages per UTC day — its own pool, apart from the planner and the shadows. */
+/**
+ * Assistant model calls per UTC day — its own pool, apart from the planner
+ * and the shadows. One per message, plus one for a message the flagship
+ * could not answer and Flash then did.
+ */
 const ASSISTANT_CAP = 80;
 
 const HISTORY_FOR_MODEL = 20;
@@ -208,6 +213,9 @@ function nowBlock(raw: unknown): { text: string; today: string } {
     : [];
 
   const tomorrow = (c.tomorrow && typeof c.tomorrow === 'object' ? c.tomorrow : {}) as Record<string, unknown>;
+  // Today's Google Calendar and open Google Tasks, read by the app with the
+  // Player's own sign-in (at most 12 calendar lines and 6 task lines).
+  const calendar = Array.isArray(c.calendar) ? c.calendar.map((e) => str(e, 100)).filter(Boolean).slice(0, 18) : [];
 
   const quests = Array.isArray(c.quests) ? c.quests.map((q) => str(q, 160)).filter(Boolean).slice(0, 30) : [];
   const catalog = Array.isArray(c.catalog) ? c.catalog.map((q) => str(q, 90)).filter(Boolean).slice(0, 120) : [];
@@ -222,6 +230,9 @@ function nowBlock(raw: unknown): { text: string; today: string } {
     blocks.length
       ? `Today's plan:\n${blocks.join('\n')}${str(plan.note, 300) ? `\n  Note: ${str(plan.note, 300)}` : ''}`
       : "Today's plan: none.",
+    calendar.length
+      ? `Today's calendar and open Google Tasks (timed lines are fixed; "to do:" lines are open tasks, not appointments):\n${calendar.map((e) => `  ${e}`).join('\n')}`
+      : '',
     `Tomorrow: ${tomorrow.planned === true ? 'already planned' : 'not planned yet'}.`,
     str(c.screen, 30) ? `They opened you from: ${str(c.screen, 30)}` : '',
     quests.length ? `Quests on the board (id — title — today — kind):\n${quests.map((q) => `  ${q}`).join('\n')}` : '',
@@ -260,6 +271,9 @@ function vetMemories(raw: unknown, known: Set<string>): { kind: MemoryKind; cont
 /* ------------------------------------------------------------------ serve */
 
 Deno.serve(async (req: Request): Promise<Response> => {
+  // The app stops listening 45 s after it sent this; everything below is
+  // timed against that.
+  const requestStart = Date.now();
   const early = preflight(req) ?? checkSecret(req);
   if (early) return early;
 
@@ -428,15 +442,46 @@ Deno.serve(async (req: Request): Promise<Response> => {
     temperature: 0.7,
     thinkingLevel: 'low',
     audio,
+    // Typed and spoken both go to the flagship first, with Flash behind it
+    // if it is slow, unavailable or sends something unusable. A spoken
+    // message waits less before Flash answers (12 s rather than 18 s),
+    // because a voice exchange that takes twenty seconds stops feeling like
+    // talking. GEMINI_MODEL_VOICE moves voice alone to another model.
+    tier: audio ? 'voice' : 'deep',
+    deepTimeoutMs: audio ? DEEP_TIMEOUT_MS.voice : DEEP_TIMEOUT_MS.chat,
+    // A reply this function would throw away (unreadable JSON, no reply)
+    // is asked of Flash instead of ending the turn.
+    accept: (text) => str(parseJson<Proposed>(text)?.reply, MAX_REPLY) !== '',
+    // Both attempts together, so a slow flagship plus Flash still answers
+    // while the app is waiting.
+    budgetMs: CHAT_BUDGET_MS - (Date.now() - requestStart),
+    // The Flash fallback is a second billed request, so it takes a second
+    // place in today's pool; with none left, the turn fails as it would have.
+    claimFallback: async () => {
+      const { data, error } = await db.rpc('bump_pool', { p_pool: 'assistant', p_limit: ASSISTANT_CAP });
+      return !error && data !== null;
+    },
   });
 
   if (!result.ok || !result.text) {
     await finishRun(db, runId, 'error', null, result.error ?? 'no reply', {
       usage: result.usage,
       durationMs: result.durationMs,
-      model: MODEL,
+      model: result.modelVersion ?? MODEL,
     });
     return fail(result.error ?? 'The System went quiet. Try again.', 502);
+  }
+
+  // If the app has already given up, saving this turn would put a reply in
+  // the history whose changes were never applied, and the Player's retry
+  // would sit next to it. Drop it instead; the retry starts clean.
+  if (Date.now() - requestStart > APP_TIMEOUT_MS - 2_000) {
+    await finishRun(db, runId, 'error', null, 'too slow: the app had stopped waiting', {
+      usage: result.usage,
+      durationMs: result.durationMs,
+      model: result.modelVersion ?? MODEL,
+    });
+    return fail('The System took too long to answer. Try again.', 504);
   }
 
   const out = parseJson<Proposed>(result.text);
@@ -445,11 +490,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const heard = audio ? str(out?.heard, MAX_MESSAGE) : '';
   const text = audio ? heard : typed;
   if (audio && !heard) {
-    await finishRun(db, runId, 'ok', 'voice: nothing heard', null, { usage: result.usage, durationMs: result.durationMs, model: MODEL });
+    await finishRun(db, runId, 'ok', 'voice: nothing heard', null, { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL });
     return fail('The System could not make out what you said. Try again, a little closer to the mic.', 422);
   }
   if (!reply) {
-    await finishRun(db, runId, 'error', null, 'empty reply', { usage: result.usage, durationMs: result.durationMs, model: MODEL });
+    await finishRun(db, runId, 'error', null, 'empty reply', { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL });
     return fail('The System went quiet. Try saying that again.', 502);
   }
 
@@ -481,7 +526,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   await finishRun(db, runId, 'ok', reply.slice(0, 200), null, {
     usage: result.usage,
     durationMs: result.durationMs,
-    model: MODEL,
+    model: result.modelVersion ?? MODEL,
   });
 
   // Passed on unjudged: the app holds the rules (src/data/questEdits.ts) and

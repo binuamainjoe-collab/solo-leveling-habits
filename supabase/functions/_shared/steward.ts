@@ -17,7 +17,8 @@
 /* ------------------------------------------------------------------ cost */
 
 /**
- * Introductory Gemini 3.8 Flash rates. Google has these doubling on
+ * Introductory Gemini 3.8 Flash rates — the default when a run recorded no
+ * model. Other models are priced by `ratesFor` below. Google has these doubling on
  * 2027-01-01, and they are third-party figures rather than scraped from
  * Google's own pricing page — worth re-checking before trusting the cost
  * line in a report.
@@ -31,9 +32,57 @@ export const COST_CONFIG = {
   usdPer1mOutput: 3.75,
 } as const;
 
-export function costUsd(tokensIn: number, tokensOut: number, tokensThoughts = 0): number {
-  const input = (tokensIn / 1_000_000) * COST_CONFIG.usdPer1mInput;
-  const output = ((tokensOut + tokensThoughts) / 1_000_000) * COST_CONFIG.usdPer1mOutput;
+export interface Rates {
+  usdPer1mInput: number;
+  usdPer1mOutput: number;
+}
+
+/**
+ * Paid-tier rates from ai.google.dev/gemini-api/docs/pricing (16 Oct 2026).
+ * gemini-4-argon goes to $4 / $20 on 2026-12-01 and Flash doubles on
+ * 2027-01-01 — update these then. Matched by family, so a dated or preview
+ * id of the same model prices the same.
+ */
+const RATES: { match: RegExp; rates: Rates }[] = [
+  { match: /flash-lite/, rates: { usdPer1mInput: 0.3, usdPer1mOutput: 2.5 } },
+  { match: /flash/, rates: { usdPer1mInput: COST_CONFIG.usdPer1mInput, usdPer1mOutput: COST_CONFIG.usdPer1mOutput } },
+  { match: /argon/, rates: { usdPer1mInput: 2, usdPer1mOutput: 10 } },
+  { match: /pro/, rates: { usdPer1mInput: 2, usdPer1mOutput: 12 } },
+];
+
+/**
+ * The rates for the model a run recorded. No model recorded means an older
+ * run, which was Flash. A model this table does not know is priced at the
+ * dearest rate here: a cost line that runs high is the safe way to be wrong.
+ *
+ * A run that fell back records every model it asked
+ * ("gemini-4-argon:timeout>gemini-3.8-flash", see runModel in models.ts)
+ * and the tokens of all of them together, so it is priced at the dearest
+ * model in it. That is an upper bound for the turn, never an undercount.
+ */
+export function ratesFor(model: string | null | undefined): Rates {
+  if (!model) return COST_CONFIG;
+  const parts = model.split('>').map((m) => oneModelRates(m.split(':')[0]));
+  return {
+    usdPer1mInput: Math.max(...parts.map((r) => r.usdPer1mInput)),
+    usdPer1mOutput: Math.max(...parts.map((r) => r.usdPer1mOutput)),
+  };
+}
+
+function oneModelRates(model: string): Rates {
+  const id = model.trim().toLowerCase();
+  const hit = RATES.find((r) => r.match.test(id));
+  if (hit) return hit.rates;
+  return {
+    usdPer1mInput: Math.max(...RATES.map((r) => r.rates.usdPer1mInput)),
+    usdPer1mOutput: Math.max(...RATES.map((r) => r.rates.usdPer1mOutput)),
+  };
+}
+
+export function costUsd(tokensIn: number, tokensOut: number, tokensThoughts = 0, model?: string | null): number {
+  const rates = ratesFor(model);
+  const input = (tokensIn / 1_000_000) * rates.usdPer1mInput;
+  const output = ((tokensOut + tokensThoughts) / 1_000_000) * rates.usdPer1mOutput;
   // Four decimals: a day of this costs fractions of a cent, and rounding to
   // two would report every single day as $0.00.
   return Math.round((input + output) * 10_000) / 10_000;

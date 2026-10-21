@@ -49,7 +49,7 @@ export function PlanNudge() {
     <Animated.View entering={FadeIn.duration(260)} exiting={FadeOut.duration(180)} style={styles.card}>
       <View style={styles.text}>
         <SystemText variant="label" color={palette.textMuted} style={styles.kicker}>
-          ◷ PLANNER
+          Planner
         </SystemText>
         <SystemText variant="title" style={styles.title}>
           Plan {day}?

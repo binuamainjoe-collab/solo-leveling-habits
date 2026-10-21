@@ -2,8 +2,9 @@ import { StyleSheet, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, icon, palette, radius, space } from '@/constants/theme';
 import {
   blockMinutes,
   dayMinutes,
@@ -223,9 +224,12 @@ function Row({
 function KindTag({ block, done }: { block: PlanBlock; done: boolean }) {
   if (done) {
     return (
-      <SystemText variant="label" color={palette.positive} style={styles.tag}>
-        ✓ DONE
-      </SystemText>
+      <View style={styles.doneTag}>
+        <Icon name="check" size={icon.small} color={palette.positive} />
+        <SystemText variant="label" color={palette.positive}>
+          Done
+        </SystemText>
+      </View>
     );
   }
   if (block.kind === 'fixed') {
@@ -378,6 +382,8 @@ const styles = StyleSheet.create({
   focus: { fontSize: 12, lineHeight: 16, color: palette.textMuted, marginTop: 2 },
   cardMeta: { fontSize: 11, color: palette.textMuted },
   tag: { fontSize: 8, letterSpacing: 1.4, marginTop: 4 },
+  // The same check symbol as a finished quest card, so "done" looks one way.
+  doneTag: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 },
   priority: {},
 
   breakRow: { flexDirection: 'row', alignItems: 'center', minHeight: 28, marginBottom: space.xs },

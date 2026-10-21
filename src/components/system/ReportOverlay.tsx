@@ -35,7 +35,7 @@ export function ReportOverlay({ report, onClose }: { report: Report; onClose: ()
         <Card raised style={styles.panel} contentStyle={styles.panelInner}>
           <View style={styles.head}>
             <SystemText variant="label" color={palette.accent} style={styles.kicker}>
-              ◉ Steward&apos;s reading
+              Steward&apos;s reading
             </SystemText>
             <SystemText variant="label" color={palette.textMuted} style={styles.date}>
               {report.date}

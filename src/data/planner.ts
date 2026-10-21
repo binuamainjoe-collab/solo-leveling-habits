@@ -207,6 +207,11 @@ export interface PlannerContext {
    * remember them.
    */
   openLoops?: string[];
+  /**
+   * That day's Google Calendar events, "09:00–10:30 Lecture". The System
+   * places them as fixed blocks instead of asking what is fixed.
+   */
+  calendar?: string[];
   /** The draft as it currently stands, so every turn edits the same plan. */
   draft: DraftPlan | null;
 }

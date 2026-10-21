@@ -2,8 +2,9 @@ import { Platform, StyleSheet, TextInput, View } from 'react-native';
 import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
 
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, font, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
 
 /**
  * The pieces every conversation with The System is made of — the planner
@@ -25,10 +26,12 @@ export function ModelLine({ text }: { text: string }) {
   );
 }
 
-export function UserBubble({ text }: { text: string }) {
+/** What the Player said. A spoken message is marked with a mic. */
+export function UserBubble({ text, voice }: { text: string; voice?: boolean }) {
   return (
     <View style={styles.userRow}>
-      <View style={styles.userBubble}>
+      <View style={[styles.userBubble, voice && styles.userVoice]}>
+        {voice ? <Icon name="mic" size={icon.small} color={palette.textMuted} /> : null}
         <SystemText variant="body" style={styles.userText}>
           {text}
         </SystemText>
@@ -88,8 +91,8 @@ export function ChatError({ message, onRetry }: { message: string; onRetry: () =
       </SystemText>
       <Pressable onPress={onRetry} accessibilityRole="button" accessibilityLabel="Try again">
         <View style={styles.retry}>
-          <SystemText variant="label" color={palette.text} style={styles.retryLabel}>
-            TRY AGAIN
+          <SystemText variant="meta" color={palette.text} style={styles.retryLabel}>
+            Try again
           </SystemText>
         </View>
       </Pressable>
@@ -177,7 +180,7 @@ export function Composer({
             accessibilityLabel="Speak to The System"
             accessibilityState={{ disabled: busy || voice.state === 'sending' }}>
             <View style={[styles.send, (busy || voice.state === 'sending') && styles.sendOff]}>
-              <MicGlyph color={palette.bg} />
+              <Icon name="mic" size={icon.bar} color={palette.bg} />
             </View>
           </Pressable>
         ) : (
@@ -188,9 +191,7 @@ export function Composer({
             accessibilityLabel="Send"
             accessibilityState={{ disabled: empty || busy }}>
             <View style={[styles.send, (empty || busy) && styles.sendOff]}>
-              <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
-                ↑
-              </SystemText>
+              <Icon name="send" size={icon.bar} color={palette.bg} />
             </View>
           </Pressable>
         )}
@@ -213,16 +214,6 @@ export interface VoiceControls {
   onCancel: () => void;
 }
 
-/** A microphone drawn from two views, so it needs no icon font or image. */
-function MicGlyph({ color }: { color: string }) {
-  return (
-    <View style={styles.mic}>
-      <View style={[styles.micHead, { borderColor: color, backgroundColor: color }]} />
-      <View style={[styles.micStand, { borderColor: color }]} />
-    </View>
-  );
-}
-
 const pulse = {
   '0%': { opacity: 1, transform: [{ scale: 1 }] },
   '50%': { opacity: 0.35, transform: [{ scale: 0.75 }] },
@@ -241,9 +232,7 @@ function RecordingBar({ voice }: { voice: VoiceControls }) {
     <View style={styles.inputRow}>
       <Pressable onPress={voice.onCancel} accessibilityRole="button" accessibilityLabel="Cancel the recording">
         <View style={styles.cancel}>
-          <SystemText variant="title" color={palette.textMuted} style={styles.cancelGlyph}>
-            ×
-          </SystemText>
+          <Icon name="close" size={icon.bar} color={palette.textMuted} />
         </View>
       </Pressable>
       <View style={styles.recording} accessibilityLiveRegion="polite">
@@ -264,9 +253,7 @@ function RecordingBar({ voice }: { voice: VoiceControls }) {
       </View>
       <Pressable onPress={voice.onStop} accessibilityRole="button" accessibilityLabel="Send the recording">
         <View style={styles.send}>
-          <SystemText variant="title" color={palette.bg} style={styles.sendGlyph}>
-            ↑
-          </SystemText>
+          <Icon name="send" size={icon.bar} color={palette.bg} />
         </View>
       </Pressable>
     </View>
@@ -275,8 +262,8 @@ function RecordingBar({ voice }: { voice: VoiceControls }) {
 
 const styles = StyleSheet.create({
   modelRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start', paddingRight: space.lg },
-  modelGlyph: { fontSize: 11, marginTop: 4 },
-  modelText: { flex: 1, fontSize: 15, lineHeight: 22, color: palette.text },
+  modelGlyph: { fontSize: 11, marginTop: 5 },
+  modelText: { flex: 1, fontSize: 17, lineHeight: 22, color: palette.text },
 
   userRow: { alignItems: 'flex-end', paddingLeft: space.xxl },
   userBubble: {
@@ -286,7 +273,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md + 2,
     paddingVertical: space.sm + 2,
   },
-  userText: { fontSize: 15, lineHeight: 21, color: palette.text },
+  userVoice: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  userText: { flexShrink: 1, fontSize: 17, lineHeight: 22, color: palette.text },
 
   typing: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 7 },
   typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: palette.textMuted },
@@ -301,16 +289,17 @@ const styles = StyleSheet.create({
     padding: space.md,
     gap: space.sm,
   },
-  errorText: { fontSize: 13, lineHeight: 19, color: palette.text },
+  errorText: { fontSize: 15, lineHeight: 20, color: palette.text },
   retry: {
     alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: palette.borderStrong,
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
+    paddingHorizontal: space.lg,
+    minHeight: HIT,
+    justifyContent: 'center',
   },
-  retryLabel: { fontSize: 9, letterSpacing: 1.6 },
+  retryLabel: { fontWeight: '600' },
 
   composer: {
     borderTopWidth: 1,
@@ -321,29 +310,29 @@ const styles = StyleSheet.create({
     backgroundColor: palette.bg,
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  // Filled capsules, like iOS suggestion chips, at the full 44pt target.
   chip: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
+    backgroundColor: palette.surfaceRaised,
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
+    paddingHorizontal: space.md + 2,
+    minHeight: HIT,
+    justifyContent: 'center',
   },
-  chipLit: { borderColor: alpha(palette.accent, 0.55) },
-  chipText: { fontSize: 12, color: palette.text },
+  chipLit: { backgroundColor: alpha(palette.accent, 0.16) },
+  chipText: { fontSize: 15, color: palette.text },
 
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
   input: {
     flex: 1,
     minHeight: 44,
     maxHeight: 120,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: palette.borderStrong,
     borderRadius: 22,
     backgroundColor: palette.surface,
     color: palette.text,
-    fontFamily: font.body,
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 17,
+    lineHeight: 22,
     paddingHorizontal: space.md + 2,
     paddingTop: 11,
     paddingBottom: 11,
@@ -358,11 +347,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendOff: { opacity: 0.35 },
-  mic: { alignItems: 'center', justifyContent: 'center' },
-  micHead: { width: 10, height: 15, borderRadius: 5, borderWidth: 2 },
-  micStand: { width: 16, height: 9, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 2, borderTopWidth: 0, marginTop: -5 },
   cancel: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: palette.borderStrong },
-  cancelGlyph: { fontSize: 22, lineHeight: 24 },
   recording: {
     flex: 1,
     minHeight: 44,
@@ -376,7 +361,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md + 2,
   },
   recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: palette.negative },
-  recText: { flex: 1, fontSize: 15, color: palette.text },
-  recLeft: { fontSize: 11, color: palette.gold },
-  sendGlyph: { fontSize: 20, lineHeight: 22 },
+  recText: { flex: 1, fontSize: 17, color: palette.text },
+  recLeft: { fontSize: 13, color: palette.gold },
 });

@@ -20,8 +20,9 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChatError, Composer, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
+import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
 import {
   ACTION_LABEL,
   actionTarget,
@@ -35,6 +36,7 @@ import { vetChanges, type VettedChange } from '@/data/questEdits';
 import { QUESTS, QUESTS_BY_ID } from '@/data/quests';
 import { addDays } from '@/data/timeline';
 import { assistantConfigured, loadHistory, sendToSystem } from '@/lib/assistant';
+import { calendarFor } from '@/lib/calendar';
 import { feedback, playSound } from '@/lib/feedback';
 import { resumeMusic, suspendMusic } from '@/lib/music';
 import { readClip, speak, stopSpeaking, type VoiceClip } from '@/lib/voice';
@@ -78,6 +80,9 @@ export function SystemAssistant() {
         <Pressable
           onPress={() => {
             playSound('tap');
+            // Start reading today's calendar while the sheet opens; the
+            // first message awaits this same cached read.
+            void calendarFor(state.date);
             setOpen(true);
           }}
           accessibilityRole="button"
@@ -157,6 +162,11 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     // A spoken message shows as a placeholder until the System says what it
     // heard. It is added per attempt, so a failed clip leaves nothing behind.
     if (clip) setMessages((m) => [...m, { role: 'user', text: '…', voice: true }]);
+    // Today's Google Calendar, so "what's next?" counts the lecture at 14:00.
+    // Cached (src/lib/calendar.ts): usually already read by the time the
+    // first message is sent, and never waited on for more than 6 s. Empty when
+    // Google is not connected.
+    const calendar = await calendarFor(state.date);
     const now = buildNow({
       date: state.date,
       xp: state.xp,
@@ -170,6 +180,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       level,
       rank,
       screen,
+      calendar,
     });
     const res = await sendToSystem(text, now, clip);
 
@@ -443,10 +454,11 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
             <View style={styles.grabber} />
             <View style={styles.header}>
               <View style={styles.headerText}>
-                <SystemText variant="label" color={palette.accent} style={styles.kicker}>
-                  ◆ THE SYSTEM
+                <SystemText variant="title" color={palette.text}>
+                  <SystemText variant="title" color={palette.accent}>◆ </SystemText>
+                  The System
                 </SystemText>
-                <SystemText variant="meta" style={styles.sub}>
+                <SystemText variant="meta" numberOfLines={1}>
                   Knows your goals, your plan and how your days are going.
                 </SystemText>
               </View>
@@ -463,17 +475,17 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={speaking ? 'Stop speaking' : speakReplies ? 'Mute spoken replies' : 'Read replies aloud'}>
-                <View style={[styles.speaker, speaking && styles.speakerOn]}>
-                  <SystemText variant="label" color={speaking ? palette.bg : speakReplies ? palette.accent : palette.textFaint} style={styles.speakerLabel}>
-                    {speaking ? '■ STOP' : speakReplies ? 'VOICE ON' : 'VOICE OFF'}
-                  </SystemText>
+                <View style={[styles.round, speaking && styles.roundOn]}>
+                  <Icon
+                    name={speaking ? 'stop' : speakReplies ? 'speaker' : 'muted'}
+                    size={icon.bar}
+                    color={speaking ? palette.bg : speakReplies ? palette.accent : palette.textMuted}
+                  />
                 </View>
               </Pressable>
               <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
-                <View style={styles.close}>
-                  <SystemText variant="title" color={palette.textMuted} style={styles.closeGlyph}>
-                    ×
-                  </SystemText>
+                <View style={styles.round}>
+                  <Icon name="close" size={icon.bar} color={palette.textMuted} />
                 </View>
               </Pressable>
             </View>
@@ -497,12 +509,15 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
 
               {messages.map((m, i) => (
                 <Animated.View key={i} entering={FadeInDown.duration(200)}>
-                  {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.voice ? `🎙 ${m.text}` : m.text} />}
+                  {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} voice={m.voice} />}
                   {m.role === 'model' && m.applied && m.applied.length > 0 ? (
                     <View style={[styles.changes, m.undone && styles.changesUndone]}>
-                      <SystemText variant="label" color={m.undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
-                        {m.undone ? '↺ UNDONE' : '✓ CHANGED'}
-                      </SystemText>
+                      <View style={styles.changesHead}>
+                        <Icon name={m.undone ? 'undo' : 'check'} size={icon.small} color={m.undone ? palette.textFaint : palette.positive} />
+                        <SystemText variant="meta" color={m.undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
+                          {m.undone ? 'Undone' : 'Changed'}
+                        </SystemText>
+                      </View>
                       {m.applied.map((line) => (
                         <SystemText key={line} variant="body" style={[styles.changeLine, m.undone && styles.changeLineUndone]}>
                           {line}
@@ -511,8 +526,9 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                       {!m.undone && m.canUndo ? (
                         <Pressable onPress={() => void undoChanges(i)} accessibilityRole="button" accessibilityLabel="Undo these changes">
                           <View style={styles.undo}>
-                            <SystemText variant="label" color={palette.textMuted} style={styles.actionLabel}>
-                              UNDO
+                            <Icon name="undo" size={icon.small} color={palette.text} />
+                            <SystemText variant="meta" color={palette.text} style={styles.actionLabel}>
+                              Undo
                             </SystemText>
                           </View>
                         </Pressable>
@@ -536,9 +552,10 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                         accessibilityRole="button"
                         accessibilityLabel={ACTION_LABEL[m.action]}>
                         <View style={styles.action}>
-                          <SystemText variant="label" color={palette.accent} style={styles.actionLabel}>
-                            {ACTION_LABEL[m.action].toUpperCase()}  →
+                          <SystemText variant="meta" color={palette.accent} style={styles.actionLabel}>
+                            {ACTION_LABEL[m.action]}
                           </SystemText>
+                          <Icon name="chevron" size={icon.small} color={palette.accent} />
                         </View>
                       </Pressable>
                     </Animated.View>
@@ -594,15 +611,15 @@ const styles = StyleSheet.create({
 
   fabWrap: { position: 'absolute', right: space.lg },
   fab: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
     boxShadow: `0 6px 18px ${alpha(palette.accent, 0.35)}`,
   },
-  fabGlyph: { fontSize: 20, lineHeight: 24 },
+  fabGlyph: { fontSize: 22, lineHeight: 28 },
   cue: {
     position: 'absolute',
     top: 3,
@@ -643,22 +660,19 @@ const styles = StyleSheet.create({
     borderBottomColor: palette.border,
   },
   headerText: { flex: 1, minWidth: 0, gap: 2 },
-  kicker: { fontSize: 10, letterSpacing: 2.4 },
-  sub: { fontSize: 11, color: palette.textMuted },
-  speaker: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.sm + 2,
-    paddingVertical: 5,
+  // Round 44pt buttons, like the close and action buttons on an iOS sheet.
+  round: {
+    width: HIT,
+    height: HIT,
+    borderRadius: HIT / 2,
+    backgroundColor: palette.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  speakerOn: { backgroundColor: palette.accent, borderColor: palette.accent },
-  speakerLabel: { fontSize: 9, letterSpacing: 1.4 },
-  close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  closeGlyph: { fontSize: 24, lineHeight: 26 },
+  roundOn: { backgroundColor: palette.accent },
 
   stream: { padding: space.lg, gap: space.lg, paddingBottom: space.xl },
-  remembered: { fontSize: 11, color: palette.gold, marginTop: space.xs, marginLeft: space.lg },
+  remembered: { fontSize: 13, color: palette.gold, marginTop: space.xs, marginLeft: space.lg },
   changes: {
     marginTop: space.sm,
     marginLeft: space.lg,
@@ -670,28 +684,33 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   changesUndone: { borderColor: palette.border, backgroundColor: 'transparent' },
-  changesKicker: { fontSize: 9, letterSpacing: 1.8 },
-  changeLine: { fontSize: 13, lineHeight: 18 },
+  changesHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  changesKicker: { fontWeight: '600' },
+  changeLine: { fontSize: 15, lineHeight: 20 },
   changeLineUndone: { color: palette.textFaint, textDecorationLine: 'line-through' },
   undo: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
     marginTop: space.xs,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
+    backgroundColor: palette.surfaceRaised,
     borderRadius: radius.pill,
     paddingHorizontal: space.md,
-    paddingVertical: 6,
+    minHeight: HIT,
   },
-  refused: { fontSize: 11, color: palette.textMuted, marginTop: space.xs, marginLeft: space.lg },
+  refused: { fontSize: 13, color: palette.textMuted, marginTop: space.xs, marginLeft: space.lg },
   action: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
     marginTop: space.sm,
     marginLeft: space.lg,
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.6),
+    backgroundColor: alpha(palette.accent, 0.14),
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 8,
+    paddingHorizontal: space.lg,
+    minHeight: HIT,
   },
-  actionLabel: { fontSize: 10, letterSpacing: 1.6 },
+  actionLabel: { fontWeight: '600' },
 });
