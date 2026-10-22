@@ -177,6 +177,8 @@ export interface GeminiCall {
    * Base64, inline — the request must stay under Gemini's 20 MB limit.
    */
   audio?: { mimeType: string; data: string };
+  /** A document or photo for the model to read (a PDF, a timetable photo). Base64, inline. */
+  file?: { mimeType: string; data: string };
   temperature?: number;
   /**
    * How much reasoning to allow.
@@ -269,6 +271,7 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
         parts: [
           { text: call.prompt },
           ...(call.audio ? [{ inlineData: { mimeType: call.audio.mimeType, data: call.audio.data } }] : []),
+          ...(call.file ? [{ inlineData: { mimeType: call.file.mimeType, data: call.file.data } }] : []),
         ],
       },
     ],

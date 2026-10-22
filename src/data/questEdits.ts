@@ -1,5 +1,6 @@
 import { isCeilingQuest } from '@/data/completion';
 import { validateDeadline, validateGoalTitle } from '@/data/goals';
+import { cleanValue, findField, valueOf, withField, type LifeProfile } from '@/data/lifeProfile';
 import type { QuestDef } from '@/data/quests';
 import { normaliseTime } from '@/data/timeline';
 
@@ -89,7 +90,8 @@ export type ChangeOp =
   | { op: 'log_progress'; questId: string; amount: number }
   | { op: 'set_schedule'; wake?: string; sleep?: string; planningHour?: string }
   | { op: 'add_goal'; title: string; deadline: string | null }
-  | { op: 'focus_goal'; goalId: string };
+  | { op: 'focus_goal'; goalId: string }
+  | { op: 'set_profile'; section: string; field: string; value: string };
 
 export interface VettedChange {
   change: ChangeOp;
@@ -107,6 +109,8 @@ export interface ChangeContext {
   values: Record<string, number>;
   settings: { wake?: string; sleep?: string; briefingTime: string };
   goals: { id: string; title: string; focus: boolean }[];
+  /** The life profile as it is now; profile changes are checked against it. */
+  profile?: LifeProfile;
 }
 
 export const MAX_CHANGES = 6;
@@ -139,6 +143,7 @@ export function vetChanges(raw: unknown, ctx: ChangeContext): { changes: VettedC
   // logs against 15, not 100.
   const overrides = { ...ctx.overrides };
   const effective = (id: string) => applyOverride(ctx.catalog[id], overrides[id]);
+  let profile: LifeProfile = ctx.profile ?? {};
 
   for (const item of list) {
     if (changes.length >= MAX_CHANGES) break;
@@ -246,6 +251,27 @@ export function vetChanges(raw: unknown, ctx: ChangeContext): { changes: VettedC
         if (!goal) { refuse('that goal does not exist'); break; }
         if (goal.focus) { refuse(`"${goal.title}" is already the focus`); break; }
         changes.push({ change: { op: 'focus_goal', goalId: id }, label: `Focus moved to ${goal.title}` });
+        break;
+      }
+      case 'set_profile': {
+        const section = str(c.section, 30);
+        const field = str(c.field, 30);
+        const known = findField(section, field);
+        if (!known) { refuse(`the profile has no "${section}.${field}"`); break; }
+        const cleaned = cleanValue(c.value);
+        if (!cleaned.ok) { refuse(cleaned.error); break; }
+        const key = `profile:${section}.${field}`;
+        if (touched.has(key)) break;
+        const before = valueOf(profile, section, field);
+        if (cleaned.value === before) { refuse(`${known.field.label} already says that`); break; }
+        touched.add(key);
+        profile = withField(profile, section, field, cleaned.value);
+        changes.push({
+          change: { op: 'set_profile', section, field, value: cleaned.value },
+          label: cleaned.value
+            ? `Profile · ${known.field.label}: ${cleaned.value}`
+            : `Profile · ${known.field.label}: cleared`,
+        });
         break;
       }
       default:

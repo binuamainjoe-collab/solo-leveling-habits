@@ -25,8 +25,11 @@ import {
   type StudyMethodId,
   type TrainingMode,
 } from '@/data/profile';
+import { fromOnboarding } from '@/data/lifeProfile';
 import { QUESTS_BY_ID } from '@/data/quests';
+import { openAssistant } from '@/lib/assistantBus';
 import { playSound } from '@/lib/feedback';
+import { saveProfileFields } from '@/lib/profile';
 import { useProgress } from '@/store/progress';
 
 const STEPS = ['name', 'age', 'goals', 'training', 'study', 'commitment', 'review'] as const;
@@ -265,7 +268,12 @@ export default function OnboardingScreen() {
           label={current === 'review' ? 'Begin day 1' : 'Continue'}
           disabled={!canContinue}
           onPress={() => {
-            if (current === 'review') completeOnboarding(draft);
+            if (current === 'review') {
+              completeOnboarding(draft);
+              // The answers seed the life profile, and The System opens with
+              // its first proposal built from them, for the Player to accept.
+              void saveProfileFields(fromOnboarding(draft), true).then(() => openAssistant('board'));
+            }
             else setStep((s) => s + 1);
           }}
         />

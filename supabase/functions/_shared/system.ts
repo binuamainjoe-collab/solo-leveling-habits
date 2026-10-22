@@ -7,6 +7,13 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
+import { CATALOG, loadProfile } from './profile.ts';
+
+/** Every profile field, as the model must name them: "studies.program, …". */
+const PROFILE_KEYS = Object.entries(CATALOG)
+  .flatMap(([section, def]) => Object.keys(def.fields).map((f) => `${section}.${f}`))
+  .join(', ');
+
 /** Who the System is and the ten coaching rules. */
 export const CORE = `You are The System — the personal assistant and coach inside a Solo Leveling themed app. You work for one person, the Player. Think JARVIS to Tony Stark: you know their goals, their schedule, their progress and their habits, and your job is to keep them moving with as few decisions from them as possible. The game layer (quests, XP, ranks, stats) is how you talk; you are the point, not an accessory.
 
@@ -34,10 +41,12 @@ export const OPS = `- Change things when the Player asks ("make it 20 minutes", 
   set_schedule {wake?, sleep?, planning_hour?} — "HH:MM".
   add_goal {goal_title, deadline?} — a new long-term goal; deadline "YYYY-MM-DD".
   focus_goal {goal_id} — make a goal the focus.
+  set_profile {section, field, value} — update the Player's PROFILE. Fields: ${PROFILE_KEYS}. An empty value clears a field.
 - Set realistic targets: when easing a quest, cut it to something they could do on a bad day.
-- You cannot edit the timeline of a plan here; for that, suggest planning the day in the Planner.`;
+- You cannot edit the timeline of a plan here; for that, suggest planning the day in the Planner.
+- KEEPING THE PROFILE CURRENT: when the Player tells you something lasting about their life that belongs in a profile field ("I started a job at the café", "I'm cutting now", "my exams are in December"), update it with set_profile straight away, without asking — the app shows the change with Undo. Write the value as a short, complete statement in third person, merged with what the field already says rather than overwriting useful detail. Never put health or medical details in it.`;
 
-export const CHANGE_OPS = ['set_target', 'reset_target', 'add_quest', 'remove_quest', 'log_progress', 'set_schedule', 'add_goal', 'focus_goal'];
+export const CHANGE_OPS = ['set_target', 'reset_target', 'add_quest', 'remove_quest', 'log_progress', 'set_schedule', 'add_goal', 'focus_goal', 'set_profile'];
 
 /** The fields one change may carry — the JSON schema items for a change. */
 export const CHANGE_FIELDS = {
@@ -52,6 +61,9 @@ export const CHANGE_FIELDS = {
   goal_title: { type: 'string' },
   deadline: { type: 'string' },
   goal_id: { type: 'string' },
+  section: { type: 'string' },
+  field: { type: 'string' },
+  value: { type: 'string' },
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -134,13 +146,16 @@ export interface Knowledge {
   forgotten: string[];
   /** The recent conversation, oldest first. */
   history: { role: string; text: string }[];
+  /** Profile fields still empty ("studies.program"), in interview order. */
+  profileEmpty: string[];
 }
 
 const MAX_MEMORIES_IN = 40;
 
 /** Everything the System knows from the database, gathered in one pass. */
 export async function knowledge(db: SupabaseClient, today: string, historyLimit: number): Promise<Knowledge> {
-  const [goalsRes, memRes, forgottenRes, snapRes, historyRes] = await Promise.all([
+  const [profile, goalsRes, memRes, forgottenRes, snapRes, historyRes] = await Promise.all([
+    loadProfile(db, today),
     db
       .from('goals')
       .select('id, title, focus, deadline')
@@ -210,6 +225,8 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
   );
 
   const text = [
+    profile.text,
+    '',
     'Goals (id — title):',
     goalLines,
     findingLines.length ? `Unread findings for the focus goal:\n${findingLines.join('\n')}` : '',
@@ -232,5 +249,6 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
     memories,
     forgotten,
     history: (historyRes.data ?? []).reverse().map((m) => ({ role: String(m.role), text: str(m.text, 1500) })),
+    profileEmpty: profile.empty,
   };
 }

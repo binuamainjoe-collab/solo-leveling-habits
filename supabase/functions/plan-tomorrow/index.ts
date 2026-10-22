@@ -32,6 +32,8 @@ import {
   worthBenching,
   worthFallingBack,
 } from '../_shared/models.ts';
+import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
+import { loadProfile } from '../_shared/profile.ts';
 
 /**
  * Planner model calls per UTC day — a separate pool from the agents' 30.
@@ -76,6 +78,8 @@ THE TIMELINE
   break — deliberate rest.
 - Never overlap two blocks. Never place anything outside wake to sleep. Under-fill rather than over-fill: assume the day will not go to plan.
 - CALENDAR lines in CONTEXT: each timed line ("09:00–10:30 Lecture") is one fixed block at exactly those times. Code has already merged overlaps and cut every timed line to the waking hours, so place each one as given (title without the bracketed note). Lines starting "outside waking hours:" are never blocks: if one matters (an early train), mention it in the note or ask whether to move wake. Lines starting "all day:" are context about the day (an exam week, a holiday), never a block.
+- TIMETABLE lines (from documents the student uploaded, such as their class timetable) are fixed blocks exactly like timed calendar lines; do not ask about them. If a calendar line and a timetable line cover the same class, place it once.
+- Use the PROFILE: plan around their routine, work hours, commute and best hours; size study to their exams; fit training to their goal; keep to what they said derails them.
 - Lines starting "to do" are the student's open Google Tasks. They are candidates for task blocks under the same rules as any task, never fixed blocks; prefer overdue and due ones, offer them in one short line, and add only what fits.
 - Give a task a concrete first move in its title where it helps starting: "Stats: one formula sheet + 2 problems", not "Study stats".
 - Estimate time honestly, including getting started. Split anything over 90 minutes into separately named parts.
@@ -302,10 +306,13 @@ async function claimCall(): Promise<{ ok: true } | { ok: false; status: number; 
  * Best effort by design. Each read that fails becomes an empty section, so a
  * slow or broken table never stops tonight's plan from being made.
  */
-async function knowledge(today: string): Promise<string> {
+async function knowledge(today: string, planDate: string): Promise<string> {
   const url = Deno.env.get('SUPABASE_URL');
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!url || !key) return '';
+
+  // The life profile and the timetable for the day being planned.
+  const profile = await loadProfile(createClient(url, key, { auth: { persistSession: false } }), planDate).catch(() => null);
 
   const read = async <T>(path: string): Promise<T[]> => {
     try {
@@ -340,6 +347,7 @@ async function knowledge(today: string): Promise<string> {
 
   return [
     'KNOWN',
+    profile?.text ?? '',
     'Goals:',
     goals.length
       ? goals
@@ -435,7 +443,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const system = [
     SYSTEM,
     contextBlock(body.context),
-    await knowledge(today),
+    await knowledge(today, /^\d{4}-\d{2}-\d{2}$/.test(str(ctx.date, 10)) ? str(ctx.date, 10) : today),
     repair.length
       ? `REPAIR\nThe student tried to finalize and the draft was rejected for these reasons. Fix exactly these, keep everything else, set wants_finalize to true, and say in one short line what you changed:\n- ${repair.join('\n- ')}`
       : '',

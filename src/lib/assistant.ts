@@ -16,7 +16,7 @@ const SECRET = process.env.EXPO_PUBLIC_APP_SECRET ?? '';
 /** A reply takes a few seconds; anything this long is a dead connection. */
 const TIMEOUT_MS = 45_000;
 
-const ACTIONS: AssistantAction[] = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests'];
+const ACTIONS: AssistantAction[] = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests', 'suggest_quests', 'open_profile'];
 
 export function assistantConfigured(): boolean {
   return BASE.length > 0 && SECRET.length > 0;
@@ -28,11 +28,15 @@ export interface AssistantResult<T> {
   error?: string;
 }
 
-async function call<T>(body: unknown, fn: 'assistant' | 'live' = 'assistant'): Promise<AssistantResult<T>> {
+export async function callSystem<T>(
+  body: unknown,
+  fn: 'assistant' | 'live' | 'profile' = 'assistant',
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<AssistantResult<T>> {
   if (!assistantConfigured()) return { ok: false, error: 'The System has no server to reach yet.' };
 
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
   try {
     const res = await fetch(`${BASE}/functions/v1/${fn}`, {
       method: 'POST',
@@ -65,7 +69,7 @@ async function call<T>(body: unknown, fn: 'assistant' | 'live' = 'assistant'): P
 
 /** The recent conversation, oldest first. */
 export async function loadHistory(): Promise<AssistantResult<AssistantMessage[]>> {
-  const res = await call<{ messages?: { role?: unknown; text?: unknown }[] }>({ op: 'history' });
+  const res = await callSystem<{ messages?: { role?: unknown; text?: unknown }[] }>({ op: 'history' });
   if (!res.ok || !res.data) return { ok: false, error: res.error };
   const messages = (res.data.messages ?? [])
     .filter((m) => (m.role === 'user' || m.role === 'model') && typeof m.text === 'string')
@@ -82,8 +86,10 @@ export async function sendToSystem(
   text: string,
   now: AssistantNow,
   audio?: VoiceClip,
+  /** chat, or 'interview' (fill the profile) or 'board' (propose quests). */
+  mode: 'chat' | 'interview' | 'board' = 'chat',
 ): Promise<AssistantResult<AssistantReply>> {
-  const res = await call<Record<string, unknown>>(audio ? { op: 'send', now, audio } : { op: 'send', text, now });
+  const res = await callSystem<Record<string, unknown>>(audio ? { op: 'send', now, audio, mode } : { op: 'send', text, now, mode });
   if (!res.ok || !res.data) return { ok: false, error: res.error };
 
   const d = res.data;
@@ -106,6 +112,7 @@ export async function sendToSystem(
       // Passed through as-is: `vetChanges` is the only thing that decides.
       changes: Array.isArray(d.changes) ? d.changes.slice(0, 12) : [],
       heard: typeof d.heard === 'string' ? d.heard.trim() : null,
+      proposal: d.proposal === true,
     },
   };
 }
@@ -115,8 +122,11 @@ export async function sendToSystem(
  * prompt, knowledge and tools locked into it on the server (supabase/
  * functions/live). The key itself never reaches the browser.
  */
-export async function openLiveCall(now: AssistantNow): Promise<AssistantResult<{ token: string; model: string }>> {
-  const res = await call<{ token?: unknown; model?: unknown }>({ op: 'token', now }, 'live');
+export async function openLiveCall(
+  now: AssistantNow,
+  mode: 'chat' | 'interview' = 'chat',
+): Promise<AssistantResult<{ token: string; model: string }>> {
+  const res = await callSystem<{ token?: unknown; model?: unknown }>({ op: 'token', now, mode }, 'live');
   if (!res.ok || !res.data) return { ok: false, error: res.error };
   const { token, model } = res.data;
   if (typeof token !== 'string' || !token || typeof model !== 'string' || !model) {
@@ -128,5 +138,5 @@ export async function openLiveCall(now: AssistantNow): Promise<AssistantResult<{
 /** Store what was said in a live call, so the next conversation remembers it. */
 export async function logLiveCall(turns: { role: 'user' | 'model'; text: string }[]): Promise<void> {
   if (turns.length === 0) return;
-  await call({ op: 'log', turns }, 'live');
+  await callSystem({ op: 'log', turns }, 'live');
 }

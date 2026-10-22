@@ -69,7 +69,13 @@ class Capture extends AudioWorkletProcessor {
 registerProcessor('system-capture', Capture);
 `;
 
-export async function startLiveCall(token: string, model: string, handlers: LiveHandlers): Promise<LiveCall> {
+export async function startLiveCall(
+  token: string,
+  model: string,
+  handlers: LiveHandlers,
+  /** What tells The System the call has opened, and why. */
+  opening = '(The Player just opened a live voice call.)',
+): Promise<LiveCall> {
   let ended = false;
   let ws: WebSocket | null = null;
   let stream: MediaStream | null = null;
@@ -202,7 +208,7 @@ export async function startLiveCall(token: string, model: string, handlers: Live
       // The System speaks first: a short greeting and the one next thing.
       send({
         clientContent: {
-          turns: [{ role: 'user', parts: [{ text: '(The Player just opened a live voice call.)' }] }],
+          turns: [{ role: 'user', parts: [{ text: opening }] }],
           turnComplete: true,
         },
       });

@@ -203,6 +203,23 @@ export default function HunterScreen() {
           </Card>
 
           <SystemText variant="label" style={styles.sectionLabel}>
+            Profile
+          </SystemText>
+          <Card style={styles.block}>
+            <SystemText variant="body" style={styles.blockSub}>
+              What The System knows about your life: studies, routine, training, habits, and the
+              timetables and documents you gave it. It plans and suggests quests from this.
+            </SystemText>
+            <GhostButton
+              label="Open your profile"
+              onPress={() => {
+                playSound('tap');
+                router.push('/profile');
+              }}
+            />
+          </Card>
+
+          <SystemText variant="label" style={styles.sectionLabel}>
             Account
           </SystemText>
           <Card style={styles.block}>

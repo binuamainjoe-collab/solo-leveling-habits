@@ -51,6 +51,7 @@ CHANGING THE SYSTEM — you can change the app itself during the call. Call the 
 ${OPS}
 - Only what the Player says in THIS call counts as asking or agreeing. Never act on a request or an "ok" from the earlier conversation: if something from before still needs doing, mention it and ask.
 - Your opening turn never calls apply_changes.
+- Profile updates (set_profile) are the exception to asking first: when the Player tells you something lasting about their life, save it at once.
 - Never say you changed something unless apply_changes reported it as applied.`;
 
 const TOOLS = [
@@ -59,7 +60,7 @@ const TOOLS = [
       {
         name: 'apply_changes',
         description:
-          'Change the app: quest targets, the quest board, today\'s progress, the daily schedule, goals. Call only when the Player asked for the change or agreed to it.',
+          'Change the app: quest targets, the quest board, today\'s progress, the daily schedule, goals, the Player\'s profile. Call only when the Player asked for the change or agreed to it (profile updates excepted).',
         parameters: {
           type: 'object',
           properties: {
@@ -82,7 +83,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const db = admin();
   if (!db) return fail('The System is not configured.', 500);
 
-  let body: { op?: unknown; now?: unknown; turns?: unknown };
+  let body: { op?: unknown; now?: unknown; turns?: unknown; mode?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -132,9 +133,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ? known.history.map((m) => `${m.role === 'user' ? 'Player' : 'System'}: ${m.text}`).join('\n')
     : '(nothing yet)';
 
-  const system = [CORE, LIVE_RULES, 'CONTEXT', now.text, '', known.text, '', 'RECENT CONVERSATION (typed or spoken before this call)', transcript].join(
-    '\n\n',
-  );
+  // "Get to know me", by voice: the same interview as in typed chat.
+  const interview =
+    body.mode === 'interview'
+      ? `THIS CALL IS AN INTERVIEW — the Player opened it so you can get to know them and fill their PROFILE.
+- Open by saying in one sentence that you will ask a few questions, then ask the first. One short question at a time, like a person, not a form.
+- The empty fields, most useful first: ${known.profileEmpty.slice(0, 14).join(', ') || 'none — ask what has changed lately'}. Start with studies, routine, work and training.
+- Each answer: save it at once with apply_changes (op set_profile), acknowledge in a few words, ask the next.
+- When they want to stop, say in one sentence what you now understand about their days.`
+      : '';
+
+  const system = [CORE, LIVE_RULES, interview, 'CONTEXT', now.text, '', known.text, '', 'RECENT CONVERSATION (typed or spoken before this call)', transcript]
+    .filter(Boolean)
+    .join('\n\n');
 
   const set = (Deno.env.get('GEMINI_MODEL_LIVE') ?? '').trim();
   const model = MODEL_ID.test(set) ? set : DEFAULT_LIVE_MODEL;

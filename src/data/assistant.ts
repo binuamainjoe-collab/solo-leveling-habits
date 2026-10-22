@@ -1,5 +1,6 @@
 import { isComplete } from '@/data/completion';
 import { plannedToQuest, taskIdForBlock, type PlannedTask } from '@/data/planner';
+import type { VettedChange } from '@/data/questEdits';
 import type { QuestDef } from '@/data/quests';
 import { addDays, clockNow, defaultPlanDate, weekdayOf, type PlanBlock } from '@/data/timeline';
 
@@ -19,7 +20,9 @@ export type AssistantAction =
   | 'plan_tomorrow'
   | 'open_planner'
   | 'open_goals'
-  | 'open_quests';
+  | 'open_quests'
+  | 'suggest_quests'
+  | 'open_profile';
 
 export interface AssistantMessage {
   role: 'user' | 'model';
@@ -38,6 +41,11 @@ export interface AssistantMessage {
   undone?: boolean;
   /** A user message that was spoken rather than typed. */
   voice?: boolean;
+  /**
+   * A quest proposal waiting for the Player: shown with Accept, applied only
+   * then. Holds the vetted changes, not the model's raw ones.
+   */
+  proposal?: { changes: VettedChange[]; accepted?: boolean; dismissed?: boolean };
 }
 
 export interface AssistantReply {
@@ -49,6 +57,8 @@ export interface AssistantReply {
   changes: unknown[];
   /** For a spoken message: what the System heard. */
   heard: string | null;
+  /** The changes are a proposal (a suggested quest board), not to be applied yet. */
+  proposal: boolean;
 }
 
 /** What the phone knows about right now, in the shape the server reads. */
@@ -192,6 +202,8 @@ export function actionTarget(
       return { pathname: '/goal' };
     case 'open_quests':
       return { pathname: '/' };
+    case 'open_profile':
+      return { pathname: '/profile' };
     default:
       return null;
   }
@@ -204,6 +216,8 @@ export const ACTION_LABEL: Record<AssistantAction, string> = {
   open_planner: 'Open the planner',
   open_goals: 'Open goals',
   open_quests: 'Open quests',
+  suggest_quests: 'Suggest quests from my profile',
+  open_profile: 'Open my profile',
 };
 
 /**

@@ -19,6 +19,8 @@ import { UnlockOverlay } from '@/components/achievement/UnlockOverlay';
 import { SystemAssistant } from '@/components/assistant/SystemAssistant';
 import { CardRevealOverlay } from '@/components/card/CardRevealOverlay';
 import { BreathingExercise } from '@/components/system/BreathingGate';
+import { fromOnboarding } from '@/data/lifeProfile';
+import { saveProfileFields } from '@/lib/profile';
 import { rememberAccount, setSignInSkipped, useSignInSkipped } from '@/lib/auth';
 import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
@@ -67,9 +69,11 @@ export default function RootLayout() {
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
             <Stack.Screen name="planner-chat" />
             <Stack.Screen name="signin" options={{ animation: 'fade' }} />
+            <Stack.Screen name="profile" />
           </Stack>
           <FeedbackBridge />
           <AuthBridge />
+          <ProfileSync />
           <OnboardingGate />
           <SnapshotBridge />
           <ReminderBridge />
@@ -191,6 +195,24 @@ function AuthBridge() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  return null;
+}
+
+/**
+ * Players who finished onboarding before the life profile existed still have
+ * their answers on the device. Once per launch they are offered to the
+ * server profile, filling only fields that are still empty, so nothing the
+ * Player or The System wrote since is overwritten.
+ */
+function ProfileSync() {
+  const { state, ready } = useProgress();
+  const profile = state.profile;
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!ready || !profile || sent.current) return;
+    sent.current = true;
+    void saveProfileFields(fromOnboarding(profile), true);
+  }, [ready, profile]);
   return null;
 }
 

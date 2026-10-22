@@ -51,7 +51,37 @@ const MAX_REPLY = 1200;
 const MAX_AUDIO_B64 = 6_000_000;
 const AUDIO_TYPES = ['audio/m4a', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp3'];
 
-const ACTIONS = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests'] as const;
+const ACTIONS = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests', 'suggest_quests', 'open_profile'] as const;
+
+/**
+ * What the Player opened the System for.
+ *   chat      — a normal message
+ *   interview — "get to know me": it asks about the empty profile fields
+ *   board     — "suggest quests from my profile": a proposal, not a change
+ */
+const MODES = ['chat', 'interview', 'board'] as const;
+type Mode = (typeof MODES)[number];
+/** What a quest proposal may change. */
+const BOARD_OPS = ['add_quest', 'remove_quest', 'set_target'];
+
+function modeRules(mode: Mode, empty: string[]): string {
+  if (mode === 'interview') {
+    return `INTERVIEW — the Player asked you to get to know them, to fill their PROFILE.
+- Ask about ONE thing at a time, short and natural, like a person getting to know them, not a form. You may ask about two closely related fields together.
+- The empty fields, most useful first: ${empty.slice(0, 14).join(', ') || 'none — the profile is full; ask what has changed lately'}.
+- Start with what helps you plan their days most: studies, routine, work, training.
+- Every answer they give: save it at once with set_profile, and in the same reply ask the next question. Acknowledge in a few words; no praise.
+- If they skip a question, move on. After about ten answers, or when they want to stop, stop asking, say what you now understand about their days in one sentence, and offer suggest_quests as the action.`;
+  }
+  if (mode === 'board') {
+    return `QUEST PROPOSAL — the Player asked you to suggest a quest board that fits their PROFILE.
+- Look at the PROFILE, the goals, their routine and how recent days went, then propose the changes that make the board fit their life: add_quest, remove_quest and set_target only, at most 6, using ids from CONTEXT. Fewer is fine; the most important first.
+- Respect their load: a full schedule gets fewer, smaller quests. A bulk wants protein and lifting; a cut wants protein and steps; studies want study and review quests sized to their exams.
+- In reply, say in two to four sentences what you propose and why, tied to specific things in their profile.
+- These changes are a PROPOSAL: the app shows them with Accept. Never say they are done.`;
+  }
+  return '';
+}
 type Action = (typeof ACTIONS)[number];
 
 const MEMORY_KINDS = ['fact', 'preference', 'commitment', 'pattern'] as const;
@@ -85,12 +115,14 @@ ACTIONS — set action to offer ONE button under your reply. It does nothing unt
 - open_planner: they want to see today's or tomorrow's timeline.
 - open_goals: goals, findings or the shadows came up.
 - open_quests: they want to tick things off or see the board.
+- suggest_quests: the profile has changed in a way that should change their quests, or they ask what quests would suit them.
+- open_profile: they want to see or edit what you know about them.
 - none: most replies.
 
 MEMORY — remember: up to 3 short, durable things worth knowing next week, in the Player's favour:
 - fact (an exam date, a deadline, where they study), preference (likes mornings, hates long lists), commitment (gym Tue/Thu), pattern (keeps skipping reading after 22:00 — only when CONTEXT shows it more than once).
 - Only what they said or what CONTEXT plainly shows. One idea per memory, written in third person, under 140 characters, dates absolute (YYYY-MM-DD).
-- Never: anything already in MEMORY, passing moods, passwords or numbers, health or medical details, anything about other people beyond a name and a role.
+- Never: anything already in MEMORY or the PROFILE, passing moods, passwords or numbers, health or medical details, anything about other people beyond a name and a role.
 - Most replies remember nothing. Return an empty list.
 
 suggestions: up to 3 short replies the Player might tap next, in their voice, at most 6 words each. Empty when nothing obvious.
@@ -125,7 +157,7 @@ const RESPONSE_SCHEMA = {
         type: 'object',
         properties: CHANGE_FIELDS,
         required: ['op'],
-        propertyOrdering: ['op', 'quest_id', 'target', 'title', 'amount', 'wake', 'sleep', 'planning_hour', 'goal_title', 'deadline', 'goal_id'],
+        propertyOrdering: ['op', 'quest_id', 'target', 'title', 'amount', 'wake', 'sleep', 'planning_hour', 'goal_title', 'deadline', 'goal_id', 'section', 'field', 'value'],
       },
     },
   },
@@ -172,7 +204,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const db = admin();
   if (!db) return fail('The System is not configured.', 500);
 
-  let body: { op?: unknown; text?: unknown; now?: unknown; audio?: unknown };
+  let body: { op?: unknown; text?: unknown; now?: unknown; audio?: unknown; mode?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -194,6 +226,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   /* ------------------------------------------------------------- send */
   const typed = str(body.text, MAX_MESSAGE);
+  const mode: Mode = MODES.includes(body.mode as Mode) ? (body.mode as Mode) : 'chat';
 
   // A spoken message: checked here, heard by the model, transcribed in the
   // same call — one call, not a speech-to-text step and then a reply.
@@ -243,6 +276,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     '',
     'CONVERSATION SO FAR',
     transcript,
+    '',
+    modeRules(mode, known.profileEmpty),
     '',
     'NEW MESSAGE FROM THE PLAYER',
     audio ? '(spoken — the audio clip attached below)' : typed,
@@ -347,9 +382,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // Passed on unjudged: the app holds the rules (src/data/questEdits.ts) and
   // the state they are checked against, so it is the one that decides.
+  // A quest proposal holds quest changes only; anything else in it was
+  // never meant to wait behind an Accept button.
   const changes = Array.isArray(out?.changes)
-    ? out!.changes.filter((c) => c && typeof c === 'object').slice(0, 8)
+    ? out!.changes
+        .filter((c) => c && typeof c === 'object')
+        .filter((c) => mode !== 'board' || BOARD_OPS.includes(String((c as Record<string, unknown>).op)))
+        .slice(0, 8)
     : [];
 
-  return json({ reply, suggestions, action, remembered, changes, heard: audio ? heard : null });
+  // A quest proposal is shown with Accept; it changes nothing until then.
+  return json({ reply, suggestions, action, remembered, changes, heard: audio ? heard : null, proposal: mode === 'board' });
 });

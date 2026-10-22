@@ -38,6 +38,9 @@ import { addDays } from '@/data/timeline';
 import { addText, attachChanges, closeTurns, toLog, type LiveTurn } from '@/data/live';
 import { assistantConfigured, loadHistory, logLiveCall, openLiveCall, sendToSystem } from '@/lib/assistant';
 import { liveSupported, startLiveCall, type LiveCall, type LiveState, type ToolCall } from '@/lib/live';
+import { useAssistantRequest, type AssistantMode } from '@/lib/assistantBus';
+import { fetchLifeProfile, saveProfileFields } from '@/lib/profile';
+import type { LifeProfile } from '@/data/lifeProfile';
 import { calendarFor } from '@/lib/calendar';
 import { feedback, playSound } from '@/lib/feedback';
 import { resumeMusic, suspendMusic } from '@/lib/music';
@@ -68,16 +71,28 @@ export function SystemAssistant() {
   const segments = useSegments() as string[];
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
+  // Another screen asked for The System in a mode (interview me, suggest
+  // quests). A request is pending until the sheet it opened is closed.
+  const request = useAssistantRequest();
+  const [seenSeq, setSeenSeq] = useState(0);
+  const pending = request && request.seq > seenSeq ? request : null;
 
-  if (!ready || !onboarded || segments[0] !== '(tabs)') return null;
+  const onTabs = segments[0] === '(tabs)';
+  if (!ready || !onboarded || (!onTabs && !pending)) return null;
 
   const screen = SCREEN_NAME[segments[1] ?? 'index'] ?? 'Quests';
   const hour = new Date().getHours();
   // A quiet cue, not an alarm: evening, and tomorrow has nothing planned.
   const cue = (hour >= 20 || hour < 4) && !state.plans[addDays(state.date, 1)];
 
+  const close = () => {
+    setOpen(false);
+    if (request) setSeenSeq(request.seq);
+  };
+
   return (
     <>
+      {onTabs ? (
       <View pointerEvents="box-none" style={[styles.fabWrap, { bottom: insets.bottom + 76 }]}>
         <Pressable
           onPress={() => {
@@ -97,12 +112,28 @@ export function SystemAssistant() {
           </View>
         </Pressable>
       </View>
-      {open ? <AssistantSheet screen={screen} onClose={() => setOpen(false)} /> : null}
+      ) : null}
+      {open || pending ? (
+        <AssistantSheet
+          key={pending ? `req${pending.seq}` : 'fab'}
+          screen={onTabs ? screen : 'Profile'}
+          initialMode={pending?.mode ?? 'chat'}
+          onClose={close}
+        />
+      ) : null}
     </>
   );
 }
 
-function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => void }) {
+function AssistantSheet({
+  screen,
+  initialMode,
+  onClose,
+}: {
+  screen: string;
+  initialMode: AssistantMode;
+  onClose: () => void;
+}) {
   const { state, setQuestOverride, toggleActive, setProgress, setSetting } = useProgress();
   const board = useActiveQuests();
   const { level, rank } = useDayStats();
@@ -121,6 +152,11 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
   const [loaded, setLoaded] = useState(!configured);
 
   const [goals, setGoals] = useState<Goal[]>([]);
+  /** What The System knows about the Player; it can update this with Undo. */
+  const [lifeProfile, setLifeProfile] = useState<LifeProfile>({});
+  /** 'interview' while The System is getting to know the Player. */
+  const [chatMode, setChatMode] = useState<'chat' | 'interview'>(initialMode === 'interview' ? 'interview' : 'chat');
+  const started = useRef(false);
 
   // Push-to-talk: tap the mic, speak, tap send. Replies to spoken messages
   // are read aloud unless the Player has muted them.
@@ -151,7 +187,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
    * middle of a call: the handlers were made when the call started, and must
    * not check a change against the board as it was then.
    */
-  const latest = useRef<{ state: typeof state; goals: Goal[]; apply: typeof apply } | null>(null);
+  const latest = useRef<{ state: typeof state; goals: Goal[]; profile: LifeProfile; apply: typeof apply } | null>(null);
   const liveTurnsRef = useRef<LiveTurn[]>([]);
   useEffect(() => {
     liveTurnsRef.current = liveTurns;
@@ -164,10 +200,11 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     if (!configured) return;
     let alive = true;
     (async () => {
-      const [res, goalState] = await Promise.all([loadHistory(), fetchGoalState()]);
+      const [res, goalState, life] = await Promise.all([loadHistory(), fetchGoalState(), fetchLifeProfile()]);
       if (!alive) return;
       if (res.ok && res.data) setMessages(res.data);
       if (goalState.ok && goalState.data) setGoals(goalState.data.goals);
+      if (life.ok && life.data) setLifeProfile(life.data.profile);
       setLoaded(true);
     })();
     return () => {
@@ -180,15 +217,25 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     return () => sub.remove();
   }, []);
 
-  async function ask(text: string, clip?: VoiceClip) {
+  async function ask(text: string, clip?: VoiceClip, mode?: 'chat' | 'interview' | 'board') {
     setBusy(true);
     setError(null);
     // A spoken message shows as a placeholder until the System says what it
     // heard. It is added per attempt, so a failed clip leaves nothing behind.
     if (clip) setMessages((m) => [...m, { role: 'user', text: '…', voice: true }]);
     const now = await nowForPrompt();
-    const res = await sendToSystem(text, now, clip);
+    const res = await sendToSystem(text, now, clip, mode ?? chatMode);
     await handleReply(res, text, clip);
+  }
+
+  /** A message the Player did not type: shown, then sent in a mode. */
+  function askAs(text: string, mode: 'interview' | 'board') {
+    if (busy) return;
+    stopSpeaking();
+    if (mode === 'interview') setChatMode('interview');
+    setMessages((m) => [...m, { role: 'user', text }]);
+    setSuggestions([]);
+    void ask(text, undefined, mode);
   }
 
   /** What the app knows about right now, for the System's prompt. */
@@ -238,7 +285,27 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       values: state.values,
       settings: state.settings,
       goals,
+      profile: lifeProfile,
     });
+
+    // A suggested quest board waits for the Player's Accept.
+    if (res.data.proposal) {
+      setBusy(false);
+      const reply = res.data;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'model',
+          text: reply.reply,
+          action: reply.action,
+          proposal: { changes },
+          refused: refused.slice(0, 3),
+        },
+      ]);
+      setSuggestions(reply.suggestions);
+      return;
+    }
+
     const { applied, undo } = await apply(changes);
     setBusy(false);
     if (applied.length) feedback('complete', 'success');
@@ -336,6 +403,20 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
           });
           break;
         }
+        case 'set_profile': {
+          const before = lifeProfile[change.section]?.[change.field] ?? '';
+          const res = await saveProfileFields([{ section: change.section, field: change.field, value: change.value }]);
+          if (!res.ok || !res.data) {
+            applied.push(`Could not update your profile: ${res.error ?? 'the server refused'}`);
+            continue;
+          }
+          setLifeProfile(res.data);
+          undo.push(async () => {
+            const back = await saveProfileFields([{ section: change.section, field: change.field, value: before }]);
+            if (back.ok && back.data) setLifeProfile(back.data);
+          });
+          break;
+        }
         case 'focus_goal': {
           const previous = goals.find((g) => g.focus);
           const res = await focusGoal(change.goalId);
@@ -358,6 +439,45 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     return { applied, undo };
   }
 
+  /**
+   * The Player accepted a suggested quest board. The changes were checked
+   * when they arrived; they are checked again now, against the board as it
+   * is, in case it changed in between.
+   */
+  async function acceptProposal(index: number) {
+    const msg = messages[index];
+    if (!msg?.proposal || msg.proposal.accepted || msg.proposal.dismissed || busy) return;
+    playSound('tap');
+    setBusy(true);
+    const raw = msg.proposal.changes.map(({ change }) => toRaw(change));
+    const { changes, refused } = vetChanges(raw, {
+      today: state.date,
+      catalog: QUESTS_BY_ID,
+      overrides: state.questOverrides ?? {},
+      activeIds: state.activeQuestIds,
+      values: state.values,
+      settings: state.settings,
+      goals,
+      profile: lifeProfile,
+    });
+    const { applied, undo } = await apply(changes);
+    setBusy(false);
+    if (applied.length) feedback('complete', 'success');
+    undoers.current[index] = undo;
+    setMessages((m) =>
+      m.map((x, i) =>
+        i === index
+          ? { ...x, proposal: { ...x.proposal!, accepted: true }, applied, canUndo: undo.length > 0, refused: [...(x.refused ?? []), ...refused].slice(0, 3) }
+          : x,
+      ),
+    );
+  }
+
+  function dismissProposal(index: number) {
+    playSound('tap');
+    setMessages((m) => m.map((x, i) => (i === index && x.proposal ? { ...x, proposal: { ...x.proposal, dismissed: true } } : x)));
+  }
+
   async function undoChanges(index: number) {
     const steps = undoers.current[index];
     if (!steps?.length) return;
@@ -371,14 +491,13 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
   /* --------------------------------------------------------- live call */
 
   useEffect(() => {
-    latest.current = { state, goals, apply };
+    latest.current = { state, goals, profile: lifeProfile, apply };
   });
 
   // Closing the sheet hangs up.
   useEffect(() => {
     return () => callRef.current?.end();
   }, []);
-
   /**
    * The System asked to change the app mid-call. Checked exactly like a
    * typed reply's changes, against the board as it is now; what passed is
@@ -395,6 +514,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       values: now.state.values,
       settings: now.state.settings,
       goals: now.goals,
+      profile: now.profile,
     });
     const { applied, undo } = await now.apply(changes);
     if (applied.length) feedback('complete', 'success');
@@ -404,7 +524,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     return { applied, refused };
   }
 
-  async function startLive() {
+  async function startLive(mode: 'chat' | 'interview' = 'chat') {
     if (liveState !== 'off' || busy) return;
     playSound('tap');
     stopSpeaking();
@@ -412,7 +532,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     setLiveState('connecting');
     // The music would be heard by the microphone, and talked over.
     suspendMusic();
-    const res = await openLiveCall(await nowForPrompt());
+    const res = await openLiveCall(await nowForPrompt(), mode);
     if (!res.ok || !res.data) {
       setLiveState('off');
       resumeMusic();
@@ -437,7 +557,7 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
           void logLiveCall(toLog(turns.slice(loggedTurns.current)));
           loggedTurns.current = turns.length;
         },
-      });
+      }, mode === 'interview' ? '(The Player opened a live call so you can get to know them for their profile.)' : undefined);
     } catch (err) {
       setLiveState('off');
       resumeMusic();
@@ -449,6 +569,19 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     playSound('tap');
     callRef.current?.end();
   }
+
+  // Opened for a reason (from the Profile screen or right after sign-up):
+  // start that conversation as soon as the history is in.
+  useEffect(() => {
+    if (!loaded || started.current || initialMode === 'chat') return;
+    started.current = true;
+    void (async () => {
+      if (initialMode === 'interview') askAs('Get to know me. Ask me questions for my profile.', 'interview');
+      else if (initialMode === 'board') askAs('Suggest quests from my profile.', 'board');
+      else if (initialMode === 'live-interview') await startLive('interview');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   async function undoLive(index: number, ids: string[]) {
     playSound('tap');
@@ -559,6 +692,11 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
   }
 
   function follow(action: AssistantAction) {
+    if (action === 'suggest_quests') {
+      playSound('tap');
+      askAs('Suggest quests from my profile.', 'board');
+      return;
+    }
     const target = actionTarget(action, state.date);
     if (!target) return;
     playSound('tap');
@@ -584,9 +722,27 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                   The System
                 </SystemText>
                 <SystemText variant="meta" numberOfLines={1}>
-                  Knows your goals, your plan and how your days are going.
+                  {chatMode === 'interview'
+                    ? 'Getting to know you. Answer, skip, or stop any time.'
+                    : 'Knows your goals, your plan and how your days are going.'}
                 </SystemText>
               </View>
+              {chatMode === 'interview' ? (
+                <Pressable
+                  onPress={() => {
+                    playSound('tap');
+                    setChatMode('chat');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop the interview">
+                  <View style={styles.interviewPill}>
+                    <SystemText variant="meta" color={palette.accent} style={styles.actionLabel}>
+                      Interview
+                    </SystemText>
+                    <Icon name="close" size={icon.small} color={palette.accent} />
+                  </View>
+                </Pressable>
+              ) : null}
               {canGoLive && liveState === 'off' ? (
                 <Pressable
                   onPress={() => void startLive()}
@@ -648,6 +804,15 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
               {messages.map((m, i) => (
                 <Animated.View key={i} entering={FadeInDown.duration(200)}>
                   {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} voice={m.voice} />}
+                  {m.role === 'model' && m.proposal && !m.proposal.accepted ? (
+                    <ProposalCard
+                      lines={m.proposal.changes.map((c) => c.label)}
+                      dismissed={Boolean(m.proposal.dismissed)}
+                      busy={busy}
+                      onAccept={() => void acceptProposal(i)}
+                      onDismiss={() => dismissProposal(i)}
+                    />
+                  ) : null}
                   {m.role === 'model' ? (
                     <ChangesCard
                       applied={m.applied}
@@ -788,6 +953,55 @@ function ChangesCard({
   );
 }
 
+/** A suggested quest board: nothing changes until Accept. */
+function ProposalCard({
+  lines,
+  dismissed,
+  busy,
+  onAccept,
+  onDismiss,
+}: {
+  lines: string[];
+  dismissed: boolean;
+  busy: boolean;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  if (lines.length === 0) return null;
+  return (
+    <View style={[styles.proposal, dismissed && styles.changesUndone]}>
+      <SystemText variant="meta" color={dismissed ? palette.textFaint : palette.accent} style={styles.changesKicker}>
+        {dismissed ? 'Not applied' : 'Suggested'}
+      </SystemText>
+      {lines.map((line) => (
+        <SystemText key={line} variant="body" style={[styles.changeLine, dismissed && styles.changeLineUndone]}>
+          {line}
+        </SystemText>
+      ))}
+      {!dismissed ? (
+        <View style={styles.proposalButtons}>
+          {/* No `disabled`: on the web it would leave the button dead; acceptProposal ignores taps while busy. */}
+          <Pressable onPress={onAccept} accessibilityRole="button" accessibilityLabel="Accept these quest changes">
+            <View style={[styles.accept, busy && styles.acceptBusy]}>
+              <Icon name="check" size={icon.small} color={palette.bg} />
+              <SystemText variant="meta" color={palette.bg} style={styles.actionLabel}>
+                Accept
+              </SystemText>
+            </View>
+          </Pressable>
+          <Pressable onPress={onDismiss} accessibilityRole="button" accessibilityLabel="Dismiss these quest changes">
+            <View style={styles.undo}>
+              <SystemText variant="meta" color={palette.text} style={styles.actionLabel}>
+                Not now
+              </SystemText>
+            </View>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const LIVE_STATUS: Record<Exclude<LiveState, 'ended'>, string> = {
   connecting: 'Connecting…',
   listening: 'Listening. Just talk.',
@@ -831,6 +1045,28 @@ function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () 
       </Pressable>
     </View>
   );
+}
+
+/** A vetted change back in the shape the model sends, to check it again. */
+function toRaw(change: VettedChange['change']): Record<string, unknown> {
+  switch (change.op) {
+    case 'set_target':
+      return { op: change.op, quest_id: change.questId, target: change.target, title: change.title };
+    case 'reset_target':
+    case 'add_quest':
+    case 'remove_quest':
+      return { op: change.op, quest_id: change.questId };
+    case 'log_progress':
+      return { op: change.op, quest_id: change.questId, amount: change.amount };
+    case 'set_schedule':
+      return { op: change.op, wake: change.wake, sleep: change.sleep, planning_hour: change.planningHour };
+    case 'add_goal':
+      return { op: change.op, goal_title: change.title, deadline: change.deadline ?? '' };
+    case 'focus_goal':
+      return { op: change.op, goal_id: change.goalId };
+    case 'set_profile':
+      return { op: change.op, section: change.section, field: change.field, value: change.value };
+  }
 }
 
 function lastIndex<T>(list: T[], test: (item: T) => boolean): number {
@@ -946,6 +1182,36 @@ const styles = StyleSheet.create({
   },
   actionLabel: { fontWeight: '600' },
 
+  interviewPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    height: HIT,
+    paddingHorizontal: space.md,
+    borderRadius: HIT / 2,
+    backgroundColor: alpha(palette.accent, 0.14),
+  },
+  proposal: {
+    marginTop: space.sm,
+    marginLeft: space.lg,
+    borderWidth: 1,
+    borderColor: alpha(palette.accent, 0.4),
+    backgroundColor: alpha(palette.accent, 0.06),
+    borderRadius: radius.md,
+    padding: space.md,
+    gap: 4,
+  },
+  proposalButtons: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
+  acceptBusy: { opacity: 0.5 },
+  accept: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    backgroundColor: palette.accent,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.lg,
+    minHeight: HIT,
+  },
   livePill: {
     flexDirection: 'row',
     alignItems: 'center',

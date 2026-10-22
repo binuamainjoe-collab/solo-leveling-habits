@@ -54,3 +54,6 @@ scratch/
 
 # arena skill run files
 .arena/
+
+# Playwright MCP snapshots and screenshots
+.playwright-mcp/
