@@ -41,6 +41,8 @@ const NAMES = {
   back: { ios: 'chevron.left', android: 'chevron_left', web: 'chevron_left' },
   external: { ios: 'arrow.up.right', android: 'open_in_new', web: 'open_in_new' },
   archive: { ios: 'books.vertical', android: 'menu_book', web: 'menu_book' },
+  live: { ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' },
+  hangUp: { ios: 'phone.down.fill', android: 'call_end', web: 'call_end' },
 } satisfies Record<string, Names>;
 
 export type IconName = keyof typeof NAMES;

@@ -35,7 +35,9 @@ import type { Goal } from '@/data/goals';
 import { vetChanges, type VettedChange } from '@/data/questEdits';
 import { QUESTS, QUESTS_BY_ID } from '@/data/quests';
 import { addDays } from '@/data/timeline';
-import { assistantConfigured, loadHistory, sendToSystem } from '@/lib/assistant';
+import { addText, attachChanges, closeTurns, toLog, type LiveTurn } from '@/data/live';
+import { assistantConfigured, loadHistory, logLiveCall, openLiveCall, sendToSystem } from '@/lib/assistant';
+import { liveSupported, startLiveCall, type LiveCall, type LiveState, type ToolCall } from '@/lib/live';
 import { calendarFor } from '@/lib/calendar';
 import { feedback, playSound } from '@/lib/feedback';
 import { resumeMusic, suspendMusic } from '@/lib/music';
@@ -133,6 +135,28 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
   /** How to take back the changes on a reply, by message index. */
   const undoers = useRef<Record<number, (() => Promise<void>)[]>>({});
 
+  // A live voice call (web only): The System listens and talks back in real
+  // time, and can change the app mid-call, with the same checks and Undo.
+  const canGoLive = configured && liveSupported();
+  const [liveState, setLiveState] = useState<LiveState | 'off'>('off');
+  const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
+  const callRef = useRef<LiveCall | null>(null);
+  /** Undo steps for changes made in a call, by the id stored on the turn. */
+  const liveUndoers = useRef<Record<string, (() => Promise<void>)[]>>({});
+  const undoSeq = useRef(0);
+  /** How many call turns are already stored, so a second call does not store the first again. */
+  const loggedTurns = useRef(0);
+  /**
+   * The newest state, goals and apply(), for a tool call that arrives in the
+   * middle of a call: the handlers were made when the call started, and must
+   * not check a change against the board as it was then.
+   */
+  const latest = useRef<{ state: typeof state; goals: Goal[]; apply: typeof apply } | null>(null);
+  const liveTurnsRef = useRef<LiveTurn[]>([]);
+  useEffect(() => {
+    liveTurnsRef.current = liveTurns;
+  }, [liveTurns]);
+
   // The running conversation lives on the server, so it is fetched fresh on
   // every open — whatever was said in the browser is here on the phone. The
   // goals come too: the System can add one or move the focus.
@@ -162,12 +186,19 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     // A spoken message shows as a placeholder until the System says what it
     // heard. It is added per attempt, so a failed clip leaves nothing behind.
     if (clip) setMessages((m) => [...m, { role: 'user', text: '…', voice: true }]);
+    const now = await nowForPrompt();
+    const res = await sendToSystem(text, now, clip);
+    await handleReply(res, text, clip);
+  }
+
+  /** What the app knows about right now, for the System's prompt. */
+  async function nowForPrompt() {
     // Today's Google Calendar, so "what's next?" counts the lecture at 14:00.
     // Cached (src/lib/calendar.ts): usually already read by the time the
     // first message is sent, and never waited on for more than 6 s. Empty when
     // Google is not connected.
     const calendar = await calendarFor(state.date);
-    const now = buildNow({
+    return buildNow({
       date: state.date,
       xp: state.xp,
       streak: state.streak,
@@ -182,8 +213,9 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
       screen,
       calendar,
     });
-    const res = await sendToSystem(text, now, clip);
+  }
 
+  async function handleReply(res: Awaited<ReturnType<typeof sendToSystem>>, text: string, clip?: VoiceClip) {
     if (!res.ok || !res.data) {
       setBusy(false);
       setPending({ text, clip });
@@ -336,6 +368,99 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, undone: true } : msg)));
   }
 
+  /* --------------------------------------------------------- live call */
+
+  useEffect(() => {
+    latest.current = { state, goals, apply };
+  });
+
+  // Closing the sheet hangs up.
+  useEffect(() => {
+    return () => callRef.current?.end();
+  }, []);
+
+  /**
+   * The System asked to change the app mid-call. Checked exactly like a
+   * typed reply's changes, against the board as it is now; what passed is
+   * applied with Undo, and the System hears what happened so it can say so.
+   */
+  async function handleTool(call: ToolCall): Promise<Record<string, unknown>> {
+    const now = latest.current;
+    if (call.name !== 'apply_changes' || !now) return { error: `unknown tool ${call.name}` };
+    const { changes, refused } = vetChanges(call.args.changes, {
+      today: now.state.date,
+      catalog: QUESTS_BY_ID,
+      overrides: now.state.questOverrides ?? {},
+      activeIds: now.state.activeQuestIds,
+      values: now.state.values,
+      settings: now.state.settings,
+      goals: now.goals,
+    });
+    const { applied, undo } = await now.apply(changes);
+    if (applied.length) feedback('complete', 'success');
+    const undoId = `u${undoSeq.current++}`;
+    if (undo.length) liveUndoers.current[undoId] = undo;
+    setLiveTurns((t) => attachChanges(t, applied, refused.slice(0, 3), undo.length > 0, undoId).turns);
+    return { applied, refused };
+  }
+
+  async function startLive() {
+    if (liveState !== 'off' || busy) return;
+    playSound('tap');
+    stopSpeaking();
+    setError(null);
+    setLiveState('connecting');
+    // The music would be heard by the microphone, and talked over.
+    suspendMusic();
+    const res = await openLiveCall(await nowForPrompt());
+    if (!res.ok || !res.data) {
+      setLiveState('off');
+      resumeMusic();
+      setError(res.error ?? 'The System could not open a live call.');
+      return;
+    }
+    try {
+      callRef.current = await startLiveCall(res.data.token, res.data.model, {
+        onState: (s) => setLiveState(s === 'ended' ? 'off' : s),
+        onUserText: (text) => setLiveTurns((t) => addText(t, 'user', text)),
+        onModelText: (text) => setLiveTurns((t) => addText(t, 'model', text)),
+        onTurnEnd: () => setLiveTurns(closeTurns),
+        onToolCall: handleTool,
+        onEnd: (err) => {
+          callRef.current = null;
+          setLiveState('off');
+          setLiveTurns(closeTurns);
+          resumeMusic();
+          if (err) setError(err);
+          // Stored, so the typed assistant and the next call remember it.
+          const turns = liveTurnsRef.current;
+          void logLiveCall(toLog(turns.slice(loggedTurns.current)));
+          loggedTurns.current = turns.length;
+        },
+      });
+    } catch (err) {
+      setLiveState('off');
+      resumeMusic();
+      setError(`The live call could not start. ${err instanceof Error ? err.message : ''}`.trim());
+    }
+  }
+
+  function endLive() {
+    playSound('tap');
+    callRef.current?.end();
+  }
+
+  async function undoLive(index: number, ids: string[]) {
+    playSound('tap');
+    // Newest change first, so a later change never undoes onto an earlier one.
+    for (const id of [...ids].reverse()) {
+      const steps = liveUndoers.current[id] ?? [];
+      delete liveUndoers.current[id];
+      for (const step of [...steps].reverse()) await step();
+    }
+    setLiveTurns((t) => t.map((turn, i) => (i === index ? { ...turn, undone: true } : turn)));
+  }
+
   /* ------------------------------------------------------------- voice */
 
   const LIMIT = 60;
@@ -462,6 +587,19 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                   Knows your goals, your plan and how your days are going.
                 </SystemText>
               </View>
+              {canGoLive && liveState === 'off' ? (
+                <Pressable
+                  onPress={() => void startLive()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Start a live voice call with The System">
+                  <View style={styles.livePill}>
+                    <Icon name="live" size={icon.small} color={palette.bg} />
+                    <SystemText variant="meta" color={palette.bg} style={styles.actionLabel}>
+                      Live
+                    </SystemText>
+                  </View>
+                </Pressable>
+              ) : null}
               {/* While it talks: stop. Otherwise: whether spoken replies are read aloud. */}
               <Pressable
                 onPress={() => {
@@ -510,35 +648,14 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
               {messages.map((m, i) => (
                 <Animated.View key={i} entering={FadeInDown.duration(200)}>
                   {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} voice={m.voice} />}
-                  {m.role === 'model' && m.applied && m.applied.length > 0 ? (
-                    <View style={[styles.changes, m.undone && styles.changesUndone]}>
-                      <View style={styles.changesHead}>
-                        <Icon name={m.undone ? 'undo' : 'check'} size={icon.small} color={m.undone ? palette.textFaint : palette.positive} />
-                        <SystemText variant="meta" color={m.undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
-                          {m.undone ? 'Undone' : 'Changed'}
-                        </SystemText>
-                      </View>
-                      {m.applied.map((line) => (
-                        <SystemText key={line} variant="body" style={[styles.changeLine, m.undone && styles.changeLineUndone]}>
-                          {line}
-                        </SystemText>
-                      ))}
-                      {!m.undone && m.canUndo ? (
-                        <Pressable onPress={() => void undoChanges(i)} accessibilityRole="button" accessibilityLabel="Undo these changes">
-                          <View style={styles.undo}>
-                            <Icon name="undo" size={icon.small} color={palette.text} />
-                            <SystemText variant="meta" color={palette.text} style={styles.actionLabel}>
-                              Undo
-                            </SystemText>
-                          </View>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-                  {m.role === 'model' && m.refused && m.refused.length > 0 ? (
-                    <SystemText variant="meta" style={styles.refused}>
-                      Not changed: {m.refused.join(' · ')}
-                    </SystemText>
+                  {m.role === 'model' ? (
+                    <ChangesCard
+                      applied={m.applied}
+                      refused={m.refused}
+                      undone={m.undone}
+                      canUndo={m.canUndo}
+                      onUndo={() => void undoChanges(i)}
+                    />
                   ) : null}
                   {m.role === 'model' && m.remembered && m.remembered.length > 0 ? (
                     <SystemText variant="meta" style={styles.remembered}>
@@ -563,6 +680,24 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
                 </Animated.View>
               ))}
 
+              {/* This sheet's live call, as it is spoken. */}
+              {liveTurns.map((t, i) =>
+                t.role === 'user' ? (
+                  t.text ? <UserBubble key={`live${i}`} text={t.text} voice /> : null
+                ) : (
+                  <View key={`live${i}`}>
+                    {t.text ? <ModelLine text={t.text} /> : null}
+                    <ChangesCard
+                      applied={t.applied}
+                      refused={t.refused}
+                      undone={t.undone}
+                      canUndo={t.canUndo}
+                      onUndo={() => void undoLive(i, t.undoIds ?? [])}
+                    />
+                  </View>
+                ),
+              )}
+
               {busy ? <Typing /> : null}
               {error ? (
                 <ChatError
@@ -574,7 +709,9 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
               ) : null}
             </ScrollView>
 
-            {configured ? (
+            {liveState !== 'off' ? (
+              <LivePanel state={liveState} onEnd={endLive} bottomInset={insets.bottom} />
+            ) : configured ? (
               <Composer
                 value={input}
                 onChange={setInput}
@@ -598,6 +735,101 @@ function AssistantSheet({ screen, onClose }: { screen: string; onClose: () => vo
         </View>
       </GestureHandlerRootView>
     </Modal>
+  );
+}
+
+/** What the System changed on one reply or call turn, with Undo. */
+function ChangesCard({
+  applied,
+  refused,
+  undone,
+  canUndo,
+  onUndo,
+}: {
+  applied?: string[];
+  refused?: string[];
+  undone?: boolean;
+  canUndo?: boolean;
+  onUndo: () => void;
+}) {
+  return (
+    <>
+      {applied && applied.length > 0 ? (
+        <View style={[styles.changes, undone && styles.changesUndone]}>
+          <View style={styles.changesHead}>
+            <Icon name={undone ? 'undo' : 'check'} size={icon.small} color={undone ? palette.textFaint : palette.positive} />
+            <SystemText variant="meta" color={undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
+              {undone ? 'Undone' : 'Changed'}
+            </SystemText>
+          </View>
+          {applied.map((line) => (
+            <SystemText key={line} variant="body" style={[styles.changeLine, undone && styles.changeLineUndone]}>
+              {line}
+            </SystemText>
+          ))}
+          {!undone && canUndo ? (
+            <Pressable onPress={onUndo} accessibilityRole="button" accessibilityLabel="Undo these changes">
+              <View style={styles.undo}>
+                <Icon name="undo" size={icon.small} color={palette.text} />
+                <SystemText variant="meta" color={palette.text} style={styles.actionLabel}>
+                  Undo
+                </SystemText>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      {refused && refused.length > 0 ? (
+        <SystemText variant="meta" style={styles.refused}>
+          Not changed: {refused.join(' · ')}
+        </SystemText>
+      ) : null}
+    </>
+  );
+}
+
+const LIVE_STATUS: Record<Exclude<LiveState, 'ended'>, string> = {
+  connecting: 'Connecting…',
+  listening: 'Listening. Just talk.',
+  speaking: 'The System is speaking. Talk to interrupt.',
+};
+
+/**
+ * In place of the composer during a call: a breathing orb that quickens
+ * while the System speaks, what is happening in words, and one way out.
+ */
+function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () => void; bottomInset: number }) {
+  const key = state === 'ended' ? 'connecting' : state;
+  return (
+    <View style={[styles.livePanel, { paddingBottom: bottomInset + space.md }]}>
+      <Animated.View
+        style={[
+          styles.orb,
+          state === 'speaking' && styles.orbSpeaking,
+          {
+            animationName: { from: { transform: [{ scale: 0.92 }] }, to: { transform: [{ scale: 1.08 }] } },
+            animationDuration: state === 'speaking' ? '450ms' : '1600ms',
+            animationIterationCount: 'infinite',
+            animationDirection: 'alternate',
+            animationTimingFunction: 'ease-in-out',
+          },
+        ]}>
+        <SystemText variant="title" color={palette.bg} style={styles.orbGlyph}>
+          ◆
+        </SystemText>
+      </Animated.View>
+      <SystemText variant="body" color={palette.textMuted} style={styles.liveStatus}>
+        {LIVE_STATUS[key]}
+      </SystemText>
+      <Pressable onPress={onEnd} accessibilityRole="button" accessibilityLabel="End the live call">
+        <View style={styles.hangUp}>
+          <Icon name="hangUp" size={icon.bar} color={palette.text} />
+          <SystemText variant="body" color={palette.text} style={styles.actionLabel}>
+            End call
+          </SystemText>
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
@@ -713,4 +945,43 @@ const styles = StyleSheet.create({
     minHeight: HIT,
   },
   actionLabel: { fontWeight: '600' },
+
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    height: HIT,
+    paddingHorizontal: space.md,
+    borderRadius: HIT / 2,
+    backgroundColor: palette.accent,
+  },
+  livePanel: {
+    alignItems: 'center',
+    gap: space.md,
+    paddingTop: space.lg,
+    paddingHorizontal: space.lg,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+  },
+  orb: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: palette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: `0 0 32px ${alpha(palette.accent, 0.45)}`,
+  },
+  orbSpeaking: { boxShadow: `0 0 48px ${alpha(palette.accent, 0.75)}` },
+  orbGlyph: { fontSize: 28, lineHeight: 34 },
+  liveStatus: { textAlign: 'center' },
+  hangUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: HIT,
+    paddingHorizontal: space.xl,
+    borderRadius: radius.pill,
+    backgroundColor: palette.negative,
+  },
 });

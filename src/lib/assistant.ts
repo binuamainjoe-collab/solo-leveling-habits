@@ -28,13 +28,13 @@ export interface AssistantResult<T> {
   error?: string;
 }
 
-async function call<T>(body: unknown): Promise<AssistantResult<T>> {
+async function call<T>(body: unknown, fn: 'assistant' | 'live' = 'assistant'): Promise<AssistantResult<T>> {
   if (!assistantConfigured()) return { ok: false, error: 'The System has no server to reach yet.' };
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/functions/v1/assistant`, {
+    const res = await fetch(`${BASE}/functions/v1/${fn}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': SECRET },
       body: JSON.stringify(body),
@@ -108,4 +108,25 @@ export async function sendToSystem(
       heard: typeof d.heard === 'string' ? d.heard.trim() : null,
     },
   };
+}
+
+/**
+ * A live voice call: a single-use token for Gemini Live, with The System's
+ * prompt, knowledge and tools locked into it on the server (supabase/
+ * functions/live). The key itself never reaches the browser.
+ */
+export async function openLiveCall(now: AssistantNow): Promise<AssistantResult<{ token: string; model: string }>> {
+  const res = await call<{ token?: unknown; model?: unknown }>({ op: 'token', now }, 'live');
+  if (!res.ok || !res.data) return { ok: false, error: res.error };
+  const { token, model } = res.data;
+  if (typeof token !== 'string' || !token || typeof model !== 'string' || !model) {
+    return { ok: false, error: 'The System could not open a live call. Try again, or type instead.' };
+  }
+  return { ok: true, data: { token, model } };
+}
+
+/** Store what was said in a live call, so the next conversation remembers it. */
+export async function logLiveCall(turns: { role: 'user' | 'model'; text: string }[]): Promise<void> {
+  if (turns.length === 0) return;
+  await call({ op: 'log', turns }, 'live');
 }
