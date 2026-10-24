@@ -125,7 +125,7 @@ function FilterChip({
         { borderColor: alpha(color, active ? 0.8 : 0.25) },
         active && { backgroundColor: alpha(color, 0.14) },
       ]}>
-      <SystemText variant="label" color={active ? color : palette.textFaint}>
+      <SystemText variant="button" color={active ? color : palette.textMuted}>
         {label}
       </SystemText>
     </RectButton>
@@ -203,7 +203,7 @@ const ArchiveCard = memo(function ArchiveCard({
             },
           ]}>
           <Icon name={accepted ? 'check' : 'plus'} size={icon.small} color={accepted ? palette.positive : cat.color} />
-          <SystemText variant="label" color={accepted ? palette.positive : cat.color}>
+          <SystemText variant="button" color={accepted ? palette.positive : cat.color}>
             {accepted ? 'On board — tap to remove' : 'Accept quest'}
           </SystemText>
         </RectButton>

@@ -266,7 +266,7 @@ function ActionButton({
           },
         ]}>
         {busy ? <ActivityIndicator size="small" color={primary ? palette.bg : palette.text} /> : null}
-        <SystemText variant="label" color={primary ? palette.bg : palette.text} style={styles.actionLabel}>
+        <SystemText variant="button" color={primary ? palette.bg : palette.text} style={styles.actionLabel}>
           {label}
         </SystemText>
       </Animated.View>
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   },
   actionGhost: { borderWidth: 1, borderColor: palette.borderStrong },
   actionPrimary: { backgroundColor: palette.accent },
-  actionLabel: { fontSize: 11, letterSpacing: 2 },
+  actionLabel: {},
 
   fine: { fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: space.sm },
 });

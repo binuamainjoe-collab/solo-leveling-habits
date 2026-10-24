@@ -19,7 +19,7 @@ export const rarityMeta: Record<
   rare: { label: 'RARE', color: '#6EA8FF', glow: '#A9CBFF', particles: 18 },
   epic: { label: 'EPIC', color: '#B98CFF', glow: '#D6BEFF', particles: 26 },
   legendary: { label: 'LEGENDARY', color: '#D9A441', glow: '#F5CE7A', particles: 34 },
-  mythic: { label: 'MYTHIC', color: '#FF6A00', glow: '#FFA766', particles: 44 },
+  mythic: { label: 'MYTHIC', color: '#FF7020', glow: '#FFA552', particles: 44 },
 };
 
 /* -------------------------------------------------------------- triggers */

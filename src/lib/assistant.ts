@@ -33,7 +33,7 @@ export async function callSystem<T>(
   fn: 'assistant' | 'live' | 'profile' = 'assistant',
   timeoutMs: number = TIMEOUT_MS,
 ): Promise<AssistantResult<T>> {
-  if (!assistantConfigured()) return { ok: false, error: 'The System has no server to reach yet.' };
+  if (!assistantConfigured()) return { ok: false, error: 'Beerus has no server to reach yet.' };
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
@@ -46,7 +46,7 @@ export async function callSystem<T>(
     });
     const text = await res.text();
     if (!res.ok) {
-      let message = `The System could not answer (${res.status}).`;
+      let message = `Beerus could not answer (${res.status}).`;
       try {
         const parsed = JSON.parse(text) as { error?: string };
         if (parsed.error) message = parsed.error;
@@ -57,10 +57,10 @@ export async function callSystem<T>(
     }
     return { ok: true, data: JSON.parse(text) as T };
   } catch (err) {
-    if (abort.signal.aborted) return { ok: false, error: 'The System took too long to answer. Try again.' };
+    if (abort.signal.aborted) return { ok: false, error: 'Beerus took too long to answer. Try again.' };
     return {
       ok: false,
-      error: `The System could not be reached. ${err instanceof Error ? err.message : ''}`.trim(),
+      error: `Beerus could not be reached. ${err instanceof Error ? err.message : ''}`.trim(),
     };
   } finally {
     clearTimeout(timer);
@@ -94,7 +94,7 @@ export async function sendToSystem(
 
   const d = res.data;
   const reply = typeof d.reply === 'string' ? d.reply.trim() : '';
-  if (!reply) return { ok: false, error: 'The System went quiet. Try again.' };
+  if (!reply) return { ok: false, error: 'Beerus went quiet. Try again.' };
 
   return {
     ok: true,
@@ -130,7 +130,7 @@ export async function openLiveCall(
   if (!res.ok || !res.data) return { ok: false, error: res.error };
   const { token, model } = res.data;
   if (typeof token !== 'string' || !token || typeof model !== 'string' || !model) {
-    return { ok: false, error: 'The System could not open a live call. Try again, or type instead.' };
+    return { ok: false, error: 'Beerus could not open a live call. Try again, or type instead.' };
   }
   return { ok: true, data: { token, model } };
 }

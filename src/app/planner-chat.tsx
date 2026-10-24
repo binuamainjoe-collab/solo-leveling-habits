@@ -13,6 +13,7 @@ import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BeerusOrb } from '@/components/assistant/BeerusOrb';
 import { ChatError, Composer, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
 import { Timeline } from '@/components/planner/Timeline';
 import { Icon } from '@/components/system/Icon';
@@ -60,6 +61,9 @@ type Busy = 'thinking' | 'sealing' | null;
  * And Android has been edge-to-edge since SDK 53, so the old "undefined on
  * Android" setting no longer moves the input above the keyboard at all.
  */
+/** Beerus plans the day too: his face marks each of his lines. */
+const BEERUS = <BeerusOrb size={26} glow={false} />;
+
 export default function PlannerChatScreen() {
   const params = useLocalSearchParams<{ date?: string }>();
   const { state, finalizePlan } = useProgress();
@@ -204,7 +208,7 @@ export default function PlannerChatScreen() {
 
     if (!res.ok || !res.data) {
       setBusy(null);
-      setError(res.error ?? 'The System did not answer.');
+      setError(res.error ?? 'Beerus did not answer.');
       return;
     }
 
@@ -344,7 +348,7 @@ export default function PlannerChatScreen() {
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
           {messages.map((m, i) => (
             <Animated.View key={i} entering={FadeInDown.duration(220)}>
-              {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} />}
+              {m.role === 'model' ? <ModelLine mark={BEERUS} text={m.text} /> : <UserBubble text={m.text} />}
 
               {i === lastModel && draft && draft.blocks.length > 0 && !sealed ? (
                 <DraftCard draft={draft} weekday={date === today ? 'Today' : weekday} issues={issues?.violations ?? []} />
@@ -352,7 +356,7 @@ export default function PlannerChatScreen() {
             </Animated.View>
           ))}
 
-          {busy ? <Typing label={busy === 'sealing' ? 'Fixing a couple of things' : null} /> : null}
+          {busy ? <Typing mark={BEERUS} label={busy === 'sealing' ? 'Fixing a couple of things' : null} /> : null}
 
           {error ? <ChatError message={error} onRetry={retry} /> : null}
 

@@ -5,7 +5,7 @@ import { Pressable } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, palette, radius, space } from '@/constants/theme';
 import { plannerConfigured } from '@/data/planner';
 import { defaultPlanDate, toMinutes, weekdayOf } from '@/data/timeline';
 import { playSound } from '@/lib/feedback';
@@ -67,8 +67,8 @@ export function PlanNudge() {
           accessibilityRole="button"
           accessibilityLabel={`Plan ${day}`}>
           <View style={styles.go}>
-            <SystemText variant="label" color={palette.accent} style={styles.goLabel}>
-              PLAN IT
+            <SystemText variant="body" color={palette.bg} style={styles.goLabel}>
+              Plan it
             </SystemText>
           </View>
         </Pressable>
@@ -80,8 +80,8 @@ export function PlanNudge() {
           accessibilityRole="button"
           accessibilityLabel="Not tonight">
           <View style={styles.later}>
-            <SystemText variant="label" color={palette.textFaint} style={styles.laterLabel}>
-              NOT TONIGHT
+            <SystemText variant="body" color={palette.text} style={styles.goLabel}>
+              Not tonight
             </SystemText>
           </View>
         </Pressable>
@@ -93,29 +93,34 @@ export function PlanNudge() {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: space.md,
+    gap: space.lg,
     backgroundColor: palette.surface,
     borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radius.lg,
-    padding: space.md,
+    borderColor: alpha(palette.accent, 0.22),
+    borderRadius: radius.xl,
+    padding: space.lg,
     marginBottom: space.lg,
   },
-  text: { flex: 1, minWidth: 0, gap: 2 },
-  kicker: { fontSize: 9, letterSpacing: 2 },
-  title: { fontSize: 16, lineHeight: 20 },
-  body: { fontSize: 11, lineHeight: 15, color: palette.textMuted },
-  actions: { gap: space.xs, alignItems: 'stretch' },
+  text: { flex: 1, minWidth: 220, gap: 2 },
+  kicker: { color: palette.accentSoft },
+  title: { fontSize: 20, lineHeight: 25 },
+  body: { color: palette.textMuted },
+  actions: { flexDirection: 'row', gap: space.sm },
   go: {
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.6),
+    minHeight: HIT,
+    backgroundColor: palette.accent,
     borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-    alignItems: 'center',
+    paddingHorizontal: space.xl,
+    justifyContent: 'center',
   },
-  goLabel: { fontSize: 9, letterSpacing: 1.6 },
-  later: { paddingHorizontal: space.sm, paddingVertical: 5, alignItems: 'center' },
-  laterLabel: { fontSize: 8, letterSpacing: 1.4 },
+  goLabel: { fontWeight: '600' },
+  later: {
+    minHeight: HIT,
+    backgroundColor: alpha(palette.text, 0.08),
+    borderRadius: radius.pill,
+    paddingHorizontal: space.xl,
+    justifyContent: 'center',
+  },
 });

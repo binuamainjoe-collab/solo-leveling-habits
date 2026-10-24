@@ -11,7 +11,7 @@ export const tierMeta: Record<
   silver: { label: 'SILVER', color: '#B8C6DC', glowA: '#E4EDF8', glowB: '#7A8CA8', particles: 20 },
   gold: { label: 'GOLD', color: '#D9A441', glowA: '#F5CE7A', glowB: '#A87716', particles: 28 },
   // Mythic takes the app's hero orange — nothing outranks it.
-  mythic: { label: 'MYTHIC', color: '#FF6A00', glowA: '#FFA766', glowB: '#C24E00', particles: 40 },
+  mythic: { label: 'MYTHIC', color: '#FF7020', glowA: '#FFA552', glowB: '#C93E16', particles: 40 },
 };
 
 /**

@@ -12,14 +12,16 @@ export interface AssistantRequest {
   mode: AssistantMode;
   /** Increases with every request, so asking twice opens twice. */
   seq: number;
+  /** A question to ask as soon as the chat opens ("How do I raise Perception?"). */
+  prompt?: string;
 }
 
 let current: AssistantRequest | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
 
-export function openAssistant(mode: AssistantMode): void {
-  current = { mode, seq: ++seq };
+export function openAssistant(mode: AssistantMode, prompt?: string): void {
+  current = { mode, seq: ++seq, ...(prompt ? { prompt } : {}) };
   listeners.forEach((l) => l());
 }
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Platform, StyleSheet, TextInput, View } from 'react-native';
 import { Pressable } from '@/components/system/Pressable';
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
@@ -12,13 +13,18 @@ import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
  * like one thing wherever it happens.
  */
 
-/** The System speaking: no bubble, just the line, marked with its diamond. */
-export function ModelLine({ text }: { text: string }) {
+/**
+ * The System speaking: no bubble, just the line, marked with its diamond —
+ * or with whatever `mark` is given (Beerus shows his face).
+ */
+export function ModelLine({ text, mark }: { text: string; mark?: ReactNode }) {
   return (
     <View style={styles.modelRow}>
-      <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-        ◆
-      </SystemText>
+      {mark ?? (
+        <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
+          ◆
+        </SystemText>
+      )}
       <SystemText variant="body" style={styles.modelText}>
         {text}
       </SystemText>
@@ -50,12 +56,14 @@ const blink = {
   '100%': { opacity: 0.25, transform: [{ translateY: 0 }] },
 };
 
-export function Typing({ label }: { label?: string | null }) {
+export function Typing({ label, mark }: { label?: string | null; mark?: ReactNode }) {
   return (
-    <Animated.View entering={FadeIn.duration(160)} style={styles.modelRow} accessibilityLabel="The System is thinking">
-      <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-        ◆
-      </SystemText>
+    <Animated.View entering={FadeIn.duration(160)} style={styles.modelRow} accessibilityLabel="Thinking">
+      {mark ?? (
+        <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
+          ◆
+        </SystemText>
+      )}
       <View style={styles.typing}>
         {[0, 1, 2].map((i) => (
           <Animated.View
@@ -115,7 +123,7 @@ export function Composer({
   suggestions,
   highlight,
   bottomInset,
-  placeholder = 'Message The System…',
+  placeholder = 'Message Beerus…',
   voice,
 }: {
   value: string;
@@ -177,7 +185,7 @@ export function Composer({
             onPress={voice.onStart}
             disabled={busy || voice.state === 'sending'}
             accessibilityRole="button"
-            accessibilityLabel="Speak to The System"
+            accessibilityLabel="Speak to Beerus"
             accessibilityState={{ disabled: busy || voice.state === 'sending' }}>
             <View style={[styles.send, (busy || voice.state === 'sending') && styles.sendOff]}>
               <Icon name="mic" size={icon.bar} color={palette.bg} />
@@ -224,7 +232,7 @@ const pulse = {
  * While listening: a pulsing dot, the time, and the two ways out — throw it
  * away, or send it. Tapping send is the push in push-to-talk.
  */
-function RecordingBar({ voice }: { voice: VoiceControls }) {
+export function RecordingBar({ voice }: { voice: VoiceControls }) {
   const left = Math.max(0, voice.limit - voice.seconds);
   const mm = Math.floor(voice.seconds / 60);
   const ss = String(voice.seconds % 60).padStart(2, '0');
@@ -261,14 +269,14 @@ function RecordingBar({ voice }: { voice: VoiceControls }) {
 }
 
 const styles = StyleSheet.create({
-  modelRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start', paddingRight: space.lg },
+  modelRow: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start', paddingRight: space.lg },
   modelGlyph: { fontSize: 11, marginTop: 5 },
-  modelText: { flex: 1, fontSize: 17, lineHeight: 22, color: palette.text },
+  modelText: { flex: 1, fontSize: 17, lineHeight: 25, color: palette.text },
 
   userRow: { alignItems: 'flex-end', paddingLeft: space.xxl },
   userBubble: {
-    backgroundColor: palette.surfaceRaised,
-    borderRadius: radius.lg,
+    backgroundColor: palette.surfaceHover,
+    borderRadius: 20,
     borderBottomRightRadius: 6,
     paddingHorizontal: space.md + 2,
     paddingVertical: space.sm + 2,

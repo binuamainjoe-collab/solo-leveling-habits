@@ -43,6 +43,17 @@ const NAMES = {
   archive: { ios: 'books.vertical', android: 'menu_book', web: 'menu_book' },
   live: { ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' },
   hangUp: { ios: 'phone.down.fill', android: 'call_end', web: 'call_end' },
+  trend: { ios: 'chart.xyaxis.line', android: 'show_chart', web: 'show_chart' },
+  bars: { ios: 'chart.bar', android: 'bar_chart', web: 'bar_chart' },
+  calendar: { ios: 'calendar', android: 'calendar_month', web: 'calendar_month' },
+  rings: { ios: 'chart.pie', android: 'donut_large', web: 'donut_large' },
+  attach: { ios: 'paperclip', android: 'attach_file', web: 'attach_file' },
+  compose: { ios: 'square.and.pencil', android: 'edit_square', web: 'edit_square' },
+  history: { ios: 'clock.arrow.circlepath', android: 'history', web: 'history' },
+  person: { ios: 'person', android: 'person', web: 'person' },
+  down: { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' },
+  bolt: { ios: 'bolt', android: 'bolt', web: 'bolt' },
+  radar: { ios: 'hexagon', android: 'hexagon', web: 'hexagon' },
 } satisfies Record<string, Names>;
 
 export type IconName = keyof typeof NAMES;

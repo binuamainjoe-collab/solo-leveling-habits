@@ -199,7 +199,7 @@ export async function startLiveCall(
         const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
         finish(
           denied
-            ? 'The System needs the microphone for a live call. Allow it for this site, then try again.'
+            ? 'Beerus needs the microphone for a live call. Allow it for this site, then try again.'
             : `The microphone could not start. ${err instanceof Error ? err.message : ''}`.trim(),
         );
         return;

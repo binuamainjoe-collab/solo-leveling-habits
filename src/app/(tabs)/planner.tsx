@@ -218,7 +218,7 @@ export default function PlannerScreen() {
               <SystemText variant="body" style={styles.cardBody}>
                 {resumable
                   ? 'Your conversation is saved. Pick it up where you left off.'
-                  : 'Talk it through with The System. It asks a few questions, then lays the day out with breathing room built in.'}
+                  : 'Talk it through with Beerus. He asks a few questions, then lays the day out with breathing room built in.'}
               </SystemText>
             </Card>
             <PrimaryButton label={resumable ? 'Resume planning' : 'Create plan'} onPress={openChat} />
@@ -236,7 +236,7 @@ function PrimaryButton({ label, onPress }: { label: string; onPress: () => void 
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
       <View style={styles.primary}>
-        <SystemText variant="label" color={palette.bg} style={styles.buttonLabel}>
+        <SystemText variant="button" color={palette.bg} style={styles.buttonLabel}>
           {label}
         </SystemText>
       </View>
@@ -248,7 +248,7 @@ function GhostButton({ label, onPress }: { label: string; onPress: () => void })
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
       <View style={styles.ghost}>
-        <SystemText variant="label" color={palette.text} style={styles.buttonLabel}>
+        <SystemText variant="button" color={palette.text} style={styles.buttonLabel}>
           {label}
         </SystemText>
       </View>
@@ -297,5 +297,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: space.md,
   },
-  buttonLabel: { fontSize: 11, letterSpacing: 2 },
+  buttonLabel: {},
 });

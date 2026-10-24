@@ -237,5 +237,5 @@ export function greeting(now: Date, tomorrowPlanned: boolean): { text: string; s
   if (h < 12) {
     return { text: 'Morning, Player. Ask me what is next, or tell me what is on your mind.', suggestions: ["What's first?", "I'm stuck", 'How am I doing?'] };
   }
-  return { text: 'The System is listening.', suggestions: ["What's next?", "I'm stuck", 'How am I doing?'] };
+  return { text: 'Beerus is listening.', suggestions: ["What's next?", "I'm stuck", 'How am I doing?'] };
 }

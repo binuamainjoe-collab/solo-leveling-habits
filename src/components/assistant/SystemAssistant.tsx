@@ -13,16 +13,20 @@ import {
   Modal,
   ScrollView as RNScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { GestureHandlerRootView, Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ChatError, Composer, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
-import { Icon } from '@/components/system/Icon';
+import { BeerusComposer, MODE_LABEL, type ChatMode } from '@/components/assistant/BeerusComposer';
+import { BeerusOrb } from '@/components/assistant/BeerusOrb';
+import { ChatError, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
+import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space, WIDE } from '@/constants/theme';
+import { salutation } from '@/data/insights';
 import {
   ACTION_LABEL,
   actionTarget,
@@ -39,7 +43,7 @@ import { addText, attachChanges, closeTurns, toLog, type LiveTurn } from '@/data
 import { assistantConfigured, loadHistory, logLiveCall, openLiveCall, sendToSystem } from '@/lib/assistant';
 import { liveSupported, startLiveCall, type LiveCall, type LiveState, type ToolCall } from '@/lib/live';
 import { useAssistantRequest, type AssistantMode } from '@/lib/assistantBus';
-import { fetchLifeProfile, saveProfileFields } from '@/lib/profile';
+import { fetchLifeProfile, pickAndImportDocument, saveProfileFields } from '@/lib/profile';
 import type { LifeProfile } from '@/data/lifeProfile';
 import { calendarFor } from '@/lib/calendar';
 import { feedback, playSound } from '@/lib/feedback';
@@ -103,11 +107,9 @@ export function SystemAssistant() {
             setOpen(true);
           }}
           accessibilityRole="button"
-          accessibilityLabel="Talk to The System">
+          accessibilityLabel={cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}>
           <View style={styles.fab}>
-            <SystemText variant="title" color={palette.bg} style={styles.fabGlyph}>
-              ◆
-            </SystemText>
+            <BeerusOrb size={60} />
             {cue ? <View style={styles.cue} /> : null}
           </View>
         </Pressable>
@@ -118,6 +120,7 @@ export function SystemAssistant() {
           key={pending ? `req${pending.seq}` : 'fab'}
           screen={onTabs ? screen : 'Profile'}
           initialMode={pending?.mode ?? 'chat'}
+          initialPrompt={pending?.prompt}
           onClose={close}
         />
       ) : null}
@@ -128,10 +131,13 @@ export function SystemAssistant() {
 function AssistantSheet({
   screen,
   initialMode,
+  initialPrompt,
   onClose,
 }: {
   screen: string;
   initialMode: AssistantMode;
+  /** Asked as soon as the history is in, when a screen opened Beerus with a question. */
+  initialPrompt?: string;
   onClose: () => void;
 }) {
   const { state, setQuestOverride, toggleActive, setProgress, setSetting } = useProgress();
@@ -157,6 +163,18 @@ function AssistantSheet({
   /** 'interview' while The System is getting to know the Player. */
   const [chatMode, setChatMode] = useState<'chat' | 'interview'>(initialMode === 'interview' ? 'interview' : 'chat');
   const started = useRef(false);
+
+  /**
+   * Each open starts as a new chat, like any chat app: the earlier
+   * conversation is one tap away, and Beerus still has it in mind. This is
+   * the index of the first message of this session.
+   */
+  const [sessionStart, setSessionStart] = useState<number | null>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE;
 
   // Push-to-talk: tap the mic, speak, tap send. Replies to spoken messages
   // are read aloud unless the Player has muted them.
@@ -203,6 +221,7 @@ function AssistantSheet({
       const [res, goalState, life] = await Promise.all([loadHistory(), fetchGoalState(), fetchLifeProfile()]);
       if (!alive) return;
       if (res.ok && res.data) setMessages(res.data);
+      setSessionStart(res.ok && res.data ? res.data.length : 0);
       if (goalState.ok && goalState.data) setGoals(goalState.data.goals);
       if (life.ok && life.data) setLifeProfile(life.data.profile);
       setLoaded(true);
@@ -270,7 +289,7 @@ function AssistantSheet({
         setMessages((prev) => prev.filter((_, i) => i !== lastIndex(prev, (x) => Boolean(x.voice) && x.text === '…')));
         resumeMusic();
       }
-      setError(res.error ?? 'The System did not answer.');
+      setError(res.error ?? 'Beerus did not answer.');
       return;
     }
     setPending(null);
@@ -536,7 +555,7 @@ function AssistantSheet({
     if (!res.ok || !res.data) {
       setLiveState('off');
       resumeMusic();
-      setError(res.error ?? 'The System could not open a live call.');
+      setError(res.error ?? 'Beerus could not open a live call.');
       return;
     }
     try {
@@ -570,18 +589,6 @@ function AssistantSheet({
     callRef.current?.end();
   }
 
-  // Opened for a reason (from the Profile screen or right after sign-up):
-  // start that conversation as soon as the history is in.
-  useEffect(() => {
-    if (!loaded || started.current || initialMode === 'chat') return;
-    started.current = true;
-    void (async () => {
-      if (initialMode === 'interview') askAs('Get to know me. Ask me questions for my profile.', 'interview');
-      else if (initialMode === 'board') askAs('Suggest quests from my profile.', 'board');
-      else if (initialMode === 'live-interview') await startLive('interview');
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded]);
 
   async function undoLive(index: number, ids: string[]) {
     playSound('tap');
@@ -605,7 +612,7 @@ function AssistantSheet({
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        setError('The System needs the microphone to hear you. Allow it in your phone settings, then try again.');
+        setError('Beerus needs the microphone to hear you. Allow it in your phone settings, then try again.');
         return;
       }
       // The music would end up in the recording.
@@ -704,23 +711,204 @@ function AssistantSheet({
     router.push(target as Parameters<typeof router.push>[0]);
   }
 
+  // Opened for a reason (from the Profile screen or right after sign-up):
+  // start that conversation as soon as the history is in.
+  useEffect(() => {
+    if (!loaded || started.current) return;
+    started.current = true;
+    void (async () => {
+      // A screen opened Beerus with a question: ask it.
+      if (initialMode === 'chat' && initialPrompt) send(initialPrompt);
+      else if (initialMode === 'interview') askAs('Get to know me. Ask me questions for my profile.', 'interview');
+      else if (initialMode === 'board') askAs('Suggest quests from my profile.', 'board');
+      else if (initialMode === 'live-interview') await startLive('interview');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  /** Read an attached PDF or photo into the profile, and say what came of it, with Undo. */
+  async function attach() {
+    if (attaching || busy) return;
+    playSound('tap');
+    setMenuOpen(false);
+    setError(null);
+    setAttaching(true);
+    const res = await pickAndImportDocument(lifeProfile, state.date);
+    setAttaching(false);
+    if (!res) return;
+    if (!res.ok || !res.data) {
+      setError(res.error ?? 'That file could not be read. Try a clearer photo or the PDF.');
+      return;
+    }
+    const { document, changed, undo, profile: next } = res.data;
+    setLifeProfile(next);
+    feedback('complete', 'success');
+    const found = [
+      document.weekly.length ? `${document.weekly.length} weekly ${document.weekly.length === 1 ? 'block' : 'blocks'}` : '',
+      document.dates.length ? `${document.dates.length} ${document.dates.length === 1 ? 'date' : 'dates'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' and ');
+    setMessages((prev) => {
+      const at = prev.length + 1;
+      if (undo.length) {
+        undoers.current[at] = [
+          async () => {
+            const back = await saveProfileFields(undo);
+            if (back.ok && back.data) setLifeProfile(back.data);
+          },
+        ];
+      }
+      return [
+        ...prev,
+        { role: 'user', text: `Attached: ${document.name}` },
+        {
+          role: 'model',
+          text: `I read it. ${document.summary}${found ? ` I keep the ${found} for planning your days.` : ''}`.trim(),
+          applied: changed.map((c) => `Profile · ${c}`),
+          canUndo: undo.length > 0,
+        },
+      ];
+    });
+  }
+
+  /** A clean screen. Beerus still remembers everything; only the view starts over. */
+  function newChat() {
+    playSound('tap');
+    stopSpeaking();
+    setSessionStart(messages.length);
+    setShowEarlier(false);
+    setChatMode('chat');
+    setMenuOpen(false);
+    setError(null);
+    setSuggestions(opening.suggestions);
+  }
+
+  function chooseMode(mode: ChatMode) {
+    setMenuOpen(false);
+    if (mode === 'interview') askAs('Get to know me. Ask me questions for my profile.', 'interview');
+    else if (mode === 'board') askAs('Suggest quests from my profile.', 'board');
+    else {
+      playSound('tap');
+      setChatMode('chat');
+    }
+  }
+
   const lastModel = lastIndex(messages, (m) => m.role === 'model');
+  /** Where this view starts: this session's messages, or everything when "earlier" is open. */
+  const firstShown = showEarlier ? 0 : (sessionStart ?? messages.length);
+  const hasEarlier = (sessionStart ?? 0) > 0 && !showEarlier;
+  const fresh = configured && loaded && firstShown >= messages.length && liveTurns.length === 0 && liveState === 'off' && !busy && !error;
+  const name = state.profile?.name?.trim();
+  const hello = `${salutation(new Date().getHours())}${name ? `, ${name}` : ''}`;
+  const mark = (
+    <View style={styles.mark}>
+      <BeerusOrb size={26} glow={false} />
+    </View>
+  );
+
+  const voice = {
+    state: voiceState,
+    seconds,
+    limit: LIMIT,
+    onStart: () => void startRecording(),
+    onStop: () => void sendRecording(),
+    onCancel: () => void cancelRecording(),
+  };
+
+  const composer = (large: boolean) => (
+    <BeerusComposer
+      value={input}
+      onChange={setInput}
+      onSend={send}
+      busy={busy || !loaded}
+      voice={voice}
+      onAttach={() => void attach()}
+      attaching={attaching}
+      mode={chatMode}
+      onModePress={() => {
+        playSound('tap');
+        setMenuOpen((o) => !o);
+      }}
+      large={large}
+    />
+  );
+
+  const menu = menuOpen ? (
+    <Animated.View entering={FadeIn.duration(160)} style={styles.menu}>
+      {(['chat', 'interview', 'board'] as const).map((m) => (
+        <Pressable key={m} onPress={() => chooseMode(m)} accessibilityRole="button" accessibilityLabel={MODE_LABEL[m]}>
+          <View style={[styles.menuItem, chatMode === m && styles.menuItemOn]}>
+            <SystemText variant="title" style={styles.menuTitle}>
+              {MODE_LABEL[m]}
+            </SystemText>
+            <SystemText variant="meta">{MODE_HINT[m]}</SystemText>
+          </View>
+        </Pressable>
+      ))}
+    </Animated.View>
+  ) : null;
+
+  const earlierLink = hasEarlier ? (
+    <Pressable
+      onPress={() => {
+        playSound('tap');
+        setShowEarlier(true);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Show the earlier conversation, ${sessionStart} messages`}>
+      <View style={styles.earlier}>
+        <Icon name="history" size={icon.small} color={palette.textMuted} />
+        <SystemText variant="meta" color={palette.text} style={styles.actionLabel}>
+          Show earlier conversation ({sessionStart})
+        </SystemText>
+      </View>
+    </Pressable>
+  ) : null;
+
+  const starters: { label: string; icon: IconName; run: () => void }[] = [
+    ...suggestions.slice(0, 2).map((s) => ({ label: s, icon: 'bolt' as const, run: () => send(s) })),
+    { label: 'Interview me for my profile', icon: 'person', run: () => chooseMode('interview') },
+    { label: 'Suggest quests that fit my life', icon: 'quests', run: () => chooseMode('board') },
+  ];
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       {/* Modal content renders outside the app's root view on Android, so it
           needs its own gesture root or none of its buttons respond. */}
       <GestureHandlerRootView style={styles.flex}>
-        <View style={styles.backdrop}>
-          <Pressable style={styles.flex} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close The System" />
-          <KeyboardAvoidingView behavior="padding" style={[styles.sheet, { paddingTop: space.sm }]}>
-            <View style={styles.grabber} />
+        <View style={[styles.window, { paddingTop: insets.top }]}>
+          {wide ? (
+            <View style={[styles.rail, { paddingBottom: insets.bottom + space.lg }]}>
+              <BeerusOrb size={32} glow={false} />
+              <View style={styles.railGap} />
+              <RailButton name="compose" label="New chat" onPress={newChat} />
+              <RailButton name="history" label="Earlier conversation" onPress={() => setShowEarlier(true)} disabled={!hasEarlier} />
+              <RailButton
+                name="person"
+                label="Your profile"
+                onPress={() => {
+                  onClose();
+                  router.push('/profile');
+                }}
+              />
+              <RailButton
+                name="planner"
+                label="Planner"
+                onPress={() => {
+                  onClose();
+                  router.push('/planner');
+                }}
+              />
+              <View style={styles.flex} />
+              <RailButton name="close" label="Close Beerus" onPress={onClose} />
+            </View>
+          ) : null}
+
+          <KeyboardAvoidingView behavior="padding" style={styles.flex}>
             <View style={styles.header}>
               <View style={styles.headerText}>
-                <SystemText variant="title" color={palette.text}>
-                  <SystemText variant="title" color={palette.accent}>◆ </SystemText>
-                  The System
-                </SystemText>
+                <SystemText variant="title">Beerus</SystemText>
                 <SystemText variant="meta" numberOfLines={1}>
                   {chatMode === 'interview'
                     ? 'Getting to know you. Answer, skip, or stop any time.'
@@ -728,26 +916,24 @@ function AssistantSheet({
                 </SystemText>
               </View>
               {chatMode === 'interview' ? (
-                <Pressable
-                  onPress={() => {
-                    playSound('tap');
-                    setChatMode('chat');
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Stop the interview">
+                <Pressable onPress={() => chooseMode('chat')} accessibilityRole="button" accessibilityLabel="Stop the interview">
                   <View style={styles.interviewPill}>
-                    <SystemText variant="meta" color={palette.accent} style={styles.actionLabel}>
+                    <SystemText variant="meta" color={palette.accentSoft} style={styles.actionLabel}>
                       Interview
                     </SystemText>
-                    <Icon name="close" size={icon.small} color={palette.accent} />
+                    <Icon name="close" size={icon.small} color={palette.accentSoft} />
+                  </View>
+                </Pressable>
+              ) : null}
+              {!wide && !fresh ? (
+                <Pressable onPress={newChat} accessibilityRole="button" accessibilityLabel="New chat">
+                  <View style={styles.round}>
+                    <Icon name="compose" size={icon.bar} color={palette.text} />
                   </View>
                 </Pressable>
               ) : null}
               {canGoLive && liveState === 'off' ? (
-                <Pressable
-                  onPress={() => void startLive()}
-                  accessibilityRole="button"
-                  accessibilityLabel="Start a live voice call with The System">
+                <Pressable onPress={() => void startLive()} accessibilityRole="button" accessibilityLabel="Start a live voice call with Beerus">
                   <View style={styles.livePill}>
                     <Icon name="live" size={icon.small} color={palette.bg} />
                     <SystemText variant="meta" color={palette.bg} style={styles.actionLabel}>
@@ -773,133 +959,205 @@ function AssistantSheet({
                   <Icon
                     name={speaking ? 'stop' : speakReplies ? 'speaker' : 'muted'}
                     size={icon.bar}
-                    color={speaking ? palette.bg : speakReplies ? palette.accent : palette.textMuted}
+                    color={speaking ? palette.bg : speakReplies ? palette.accentSoft : palette.textMuted}
                   />
                 </View>
               </Pressable>
-              <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
-                <View style={styles.round}>
-                  <Icon name="close" size={icon.bar} color={palette.textMuted} />
-                </View>
-              </Pressable>
+              {!wide ? (
+                <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close Beerus">
+                  <View style={styles.round}>
+                    <Icon name="close" size={icon.bar} color={palette.textMuted} />
+                  </View>
+                </Pressable>
+              ) : null}
             </View>
 
-            <ScrollView
-              ref={(r: unknown) => {
-                scrollRef.current = r as RNScrollView | null;
-              }}
-              style={styles.flex}
-              contentContainerStyle={styles.stream}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
-              {!configured ? (
-                <ModelLine text="The System has no server configured, so it cannot talk yet. Everything else still works." />
-              ) : !loaded ? (
-                <Typing />
-              ) : messages.length === 0 ? (
-                <ModelLine text={opening.text} />
-              ) : null}
-
-              {messages.map((m, i) => (
-                <Animated.View key={i} entering={FadeInDown.duration(200)}>
-                  {m.role === 'model' ? <ModelLine text={m.text} /> : <UserBubble text={m.text} voice={m.voice} />}
-                  {m.role === 'model' && m.proposal && !m.proposal.accepted ? (
-                    <ProposalCard
-                      lines={m.proposal.changes.map((c) => c.label)}
-                      dismissed={Boolean(m.proposal.dismissed)}
-                      busy={busy}
-                      onAccept={() => void acceptProposal(i)}
-                      onDismiss={() => dismissProposal(i)}
-                    />
-                  ) : null}
-                  {m.role === 'model' ? (
-                    <ChangesCard
-                      applied={m.applied}
-                      refused={m.refused}
-                      undone={m.undone}
-                      canUndo={m.canUndo}
-                      onUndo={() => void undoChanges(i)}
-                    />
-                  ) : null}
-                  {m.role === 'model' && m.remembered && m.remembered.length > 0 ? (
-                    <SystemText variant="meta" style={styles.remembered}>
-                      ◆ Remembered: {m.remembered.join(' · ')}
-                    </SystemText>
-                  ) : null}
-                  {i === lastModel && m.action && m.action !== 'none' && !busy ? (
-                    <Animated.View entering={FadeIn.duration(220)}>
+            {fresh ? (
+              <ScrollView style={styles.flex} contentContainerStyle={styles.freshScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <View style={styles.column}>
+                  <View style={styles.freshHead}>
+                    <BeerusOrb size={wide ? 108 : 88} breathing />
+                    <View>
+                      <SystemText variant="heading" style={styles.hello}>
+                        {hello}
+                      </SystemText>
+                      <SystemText variant="heading" color={palette.textMuted} style={styles.hello}>
+                        What’s on your mind?
+                      </SystemText>
+                    </View>
+                  </View>
+                  {composer(true)}
+                  {menu}
+                  <View style={styles.starters}>
+                    {starters.map((s) => (
                       <Pressable
-                        onPress={() => follow(m.action!)}
+                        key={s.label}
+                        style={styles.starterWrap}
+                        onPress={() => {
+                          playSound('tap');
+                          s.run();
+                        }}
                         accessibilityRole="button"
-                        accessibilityLabel={ACTION_LABEL[m.action]}>
-                        <View style={styles.action}>
-                          <SystemText variant="meta" color={palette.accent} style={styles.actionLabel}>
-                            {ACTION_LABEL[m.action]}
+                        accessibilityLabel={s.label}>
+                        <View style={styles.starter}>
+                          <Icon name={s.icon} size={icon.body} color={palette.accentSoft} />
+                          <SystemText variant="body" color={palette.text} style={styles.starterText} numberOfLines={2}>
+                            {s.label}
                           </SystemText>
-                          <Icon name="chevron" size={icon.small} color={palette.accent} />
                         </View>
                       </Pressable>
-                    </Animated.View>
-                  ) : null}
-                </Animated.View>
-              ))}
-
-              {/* This sheet's live call, as it is spoken. */}
-              {liveTurns.map((t, i) =>
-                t.role === 'user' ? (
-                  t.text ? <UserBubble key={`live${i}`} text={t.text} voice /> : null
-                ) : (
-                  <View key={`live${i}`}>
-                    {t.text ? <ModelLine text={t.text} /> : null}
-                    <ChangesCard
-                      applied={t.applied}
-                      refused={t.refused}
-                      undone={t.undone}
-                      canUndo={t.canUndo}
-                      onUndo={() => void undoLive(i, t.undoIds ?? [])}
-                    />
+                    ))}
                   </View>
-                ),
-              )}
-
-              {busy ? <Typing /> : null}
-              {error ? (
-                <ChatError
-                  message={error}
-                  onRetry={() => {
-                    if (pending) void ask(pending.text, pending.clip);
+                  {earlierLink}
+                </View>
+              </ScrollView>
+            ) : (
+              <>
+                <ScrollView
+                  ref={(r: unknown) => {
+                    scrollRef.current = r as RNScrollView | null;
                   }}
-                />
-              ) : null}
-            </ScrollView>
+                  style={styles.flex}
+                  contentContainerStyle={styles.streamScroll}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
+                  <View style={[styles.column, styles.stream]}>
+                    {earlierLink}
+                    {!configured ? (
+                      <ModelLine mark={mark} text="Beerus has no server configured, so he cannot talk yet. Everything else still works." />
+                    ) : !loaded ? (
+                      <Typing mark={mark} />
+                    ) : null}
 
-            {liveState !== 'off' ? (
-              <LivePanel state={liveState} onEnd={endLive} bottomInset={insets.bottom} />
-            ) : configured ? (
-              <Composer
-                value={input}
-                onChange={setInput}
-                onSend={send}
-                busy={busy || !loaded}
-                suggestions={suggestions}
-                highlight={(s) => /plan/i.test(s)}
-                bottomInset={insets.bottom}
-                placeholder="Ask The System…"
-                voice={{
-                  state: voiceState,
-                  seconds,
-                  limit: LIMIT,
-                  onStart: () => void startRecording(),
-                  onStop: () => void sendRecording(),
-                  onCancel: () => void cancelRecording(),
-                }}
-              />
-            ) : null}
+                    {messages.map((m, i) =>
+                      i < firstShown ? null : (
+                        <Animated.View key={i} entering={FadeInDown.duration(200)}>
+                          {m.role === 'model' ? <ModelLine mark={mark} text={m.text} /> : <UserBubble text={m.text} voice={m.voice} />}
+                          {m.role === 'model' && m.proposal && !m.proposal.accepted ? (
+                            <ProposalCard
+                              lines={m.proposal.changes.map((c) => c.label)}
+                              dismissed={Boolean(m.proposal.dismissed)}
+                              busy={busy}
+                              onAccept={() => void acceptProposal(i)}
+                              onDismiss={() => dismissProposal(i)}
+                            />
+                          ) : null}
+                          {m.role === 'model' ? (
+                            <ChangesCard
+                              applied={m.applied}
+                              refused={m.refused}
+                              undone={m.undone}
+                              canUndo={m.canUndo}
+                              onUndo={() => void undoChanges(i)}
+                            />
+                          ) : null}
+                          {m.role === 'model' && m.remembered && m.remembered.length > 0 ? (
+                            <SystemText variant="meta" style={styles.remembered}>
+                              Remembered: {m.remembered.join('; ')}
+                            </SystemText>
+                          ) : null}
+                          {i === lastModel && m.action && m.action !== 'none' && !busy ? (
+                            <Animated.View entering={FadeIn.duration(220)}>
+                              <Pressable onPress={() => follow(m.action!)} accessibilityRole="button" accessibilityLabel={ACTION_LABEL[m.action]}>
+                                <View style={styles.action}>
+                                  <SystemText variant="meta" color={palette.accentSoft} style={styles.actionLabel}>
+                                    {ACTION_LABEL[m.action]}
+                                  </SystemText>
+                                  <Icon name="chevron" size={icon.small} color={palette.accentSoft} />
+                                </View>
+                              </Pressable>
+                            </Animated.View>
+                          ) : null}
+                        </Animated.View>
+                      ),
+                    )}
+
+                    {/* This window's live call, as it is spoken. */}
+                    {liveTurns.map((t, i) =>
+                      t.role === 'user' ? (
+                        t.text ? <UserBubble key={`live${i}`} text={t.text} voice /> : null
+                      ) : (
+                        <View key={`live${i}`}>
+                          {t.text ? <ModelLine mark={mark} text={t.text} /> : null}
+                          <ChangesCard
+                            applied={t.applied}
+                            refused={t.refused}
+                            undone={t.undone}
+                            canUndo={t.canUndo}
+                            onUndo={() => void undoLive(i, t.undoIds ?? [])}
+                          />
+                        </View>
+                      ),
+                    )}
+
+                    {busy ? <Typing mark={mark} /> : null}
+                    {error ? (
+                      <ChatError
+                        message={error}
+                        onRetry={() => {
+                          if (pending) void ask(pending.text, pending.clip);
+                          else setError(null);
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                </ScrollView>
+
+                {liveState !== 'off' ? (
+                  <LivePanel state={liveState} onEnd={endLive} bottomInset={insets.bottom} />
+                ) : configured ? (
+                  <View style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
+                    <View style={styles.column}>
+                      {suggestions.length > 0 && !busy ? (
+                        <Animated.View entering={FadeIn.duration(200)} style={styles.chips}>
+                          {suggestions.map((s) => (
+                            <Pressable key={s} onPress={() => send(s)} accessibilityRole="button" accessibilityLabel={s}>
+                              <View style={[styles.chip, /plan/i.test(s) && styles.chipLit]}>
+                                <SystemText variant="meta" color={/plan/i.test(s) ? palette.accentSoft : palette.text} style={styles.actionLabel}>
+                                  {s}
+                                </SystemText>
+                              </View>
+                            </Pressable>
+                          ))}
+                        </Animated.View>
+                      ) : null}
+                      {menu}
+                      {composer(false)}
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
           </KeyboardAvoidingView>
         </View>
       </GestureHandlerRootView>
     </Modal>
+  );
+}
+
+const MODE_HINT: Record<ChatMode, string> = {
+  chat: 'Ask anything. Beerus changes things when you ask, with Undo.',
+  interview: 'One question at a time, to fill in your profile.',
+  board: 'A quest board for your life. Nothing changes until you accept.',
+};
+
+/** One button on the side rail: an icon, with its name for screen readers. */
+function RailButton({ name, label, onPress, disabled }: { name: IconName; label: string; onPress: () => void; disabled?: boolean }) {
+  return (
+    <Pressable
+      onPress={() => {
+        playSound('tap');
+        onPress();
+      }}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}>
+      <View style={[styles.railButton, disabled && styles.railOff]}>
+        <Icon name={name} size={icon.bar} color={palette.textMuted} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -1005,7 +1263,7 @@ function ProposalCard({
 const LIVE_STATUS: Record<Exclude<LiveState, 'ended'>, string> = {
   connecting: 'Connecting…',
   listening: 'Listening. Just talk.',
-  speaking: 'The System is speaking. Talk to interrupt.',
+  speaking: 'Beerus is speaking. Talk to interrupt.',
 };
 
 /**
@@ -1074,20 +1332,14 @@ function lastIndex<T>(list: T[], test: (item: T) => boolean): number {
   return -1;
 }
 
+/** Lines under a reply start where its text does: past Beerus's 26pt face and the gap. */
+const INDENT = 38;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
   fabWrap: { position: 'absolute', right: space.lg },
-  fab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: palette.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: `0 6px 18px ${alpha(palette.accent, 0.35)}`,
-  },
-  fabGlyph: { fontSize: 22, lineHeight: 28 },
+  fab: { width: 60, height: 60 },
   cue: {
     position: 'absolute',
     top: 3,
@@ -1100,33 +1352,83 @@ const styles = StyleSheet.create({
     borderColor: palette.bg,
   },
 
-  backdrop: { flex: 1, backgroundColor: alpha('#000000', 0.55), justifyContent: 'flex-end' },
-  sheet: {
-    height: '88%',
-    backgroundColor: palette.bg,
-    borderTopLeftRadius: radius.lg + 6,
-    borderTopRightRadius: radius.lg + 6,
-    borderTopWidth: 1,
-    borderColor: alpha(palette.accent, 0.25),
-    overflow: 'hidden',
+  window: { flex: 1, flexDirection: 'row', backgroundColor: palette.bg },
+  rail: {
+    width: 72,
+    alignItems: 'center',
+    gap: space.sm,
+    paddingTop: space.lg,
+    borderRightWidth: 1,
+    borderRightColor: palette.border,
+    backgroundColor: palette.surface,
   },
-  grabber: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: palette.borderStrong,
-    marginBottom: space.xs,
-  },
+  railGap: { height: space.md },
+  railButton: { width: HIT, height: HIT, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  railOff: { opacity: 0.35 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
     paddingHorizontal: space.lg,
-    paddingBottom: space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.border,
+    paddingVertical: space.sm,
   },
+  mark: { marginTop: -1 },
+
+  // The column every part of the chat sits in, so lines stay readable on a wide screen.
+  column: { width: '100%', maxWidth: 760, alignSelf: 'center' },
+  freshScroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: space.lg, paddingVertical: space.xl },
+  freshHead: { alignItems: 'center', gap: space.lg, marginBottom: space.xl },
+  hello: { textAlign: 'center' },
+  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
+  // Two to a row in the 760 column; one to a row on a phone.
+  starterWrap: { flexGrow: 1, flexBasis: 300 },
+  starter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 56,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: alpha(palette.surface, 0.7),
+  },
+  starterText: { flex: 1, fontSize: 15, lineHeight: 20 },
+  earlier: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    minHeight: HIT,
+    paddingHorizontal: space.lg,
+    marginTop: space.md,
+  },
+  menu: {
+    marginTop: space.sm,
+    marginBottom: space.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    backgroundColor: palette.surface,
+    padding: space.xs,
+  },
+  menuItem: { borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.sm, minHeight: HIT, justifyContent: 'center' },
+  menuItemOn: { backgroundColor: palette.surfaceRaised },
+  menuTitle: { fontSize: 15 },
+  streamScroll: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.xl },
+  dock: { paddingHorizontal: space.lg, paddingTop: space.sm },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginBottom: space.sm },
+  chip: {
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+  },
+  chipLit: { borderColor: alpha(palette.accent, 0.5), backgroundColor: alpha(palette.accent, 0.1) },
   headerText: { flex: 1, minWidth: 0, gap: 2 },
   // Round 44pt buttons, like the close and action buttons on an iOS sheet.
   round: {
@@ -1139,11 +1441,11 @@ const styles = StyleSheet.create({
   },
   roundOn: { backgroundColor: palette.accent },
 
-  stream: { padding: space.lg, gap: space.lg, paddingBottom: space.xl },
-  remembered: { fontSize: 13, color: palette.gold, marginTop: space.xs, marginLeft: space.lg },
+  stream: { gap: space.xl },
+  remembered: { fontSize: 13, color: palette.gold, marginTop: space.xs, marginLeft: INDENT },
   changes: {
     marginTop: space.sm,
-    marginLeft: space.lg,
+    marginLeft: INDENT,
     borderWidth: 1,
     borderColor: alpha(palette.positive, 0.35),
     backgroundColor: alpha(palette.positive, 0.06),
@@ -1167,14 +1469,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     minHeight: HIT,
   },
-  refused: { fontSize: 13, color: palette.textMuted, marginTop: space.xs, marginLeft: space.lg },
+  refused: { fontSize: 13, color: palette.textMuted, marginTop: space.xs, marginLeft: INDENT },
   action: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
     marginTop: space.sm,
-    marginLeft: space.lg,
+    marginLeft: INDENT,
     backgroundColor: alpha(palette.accent, 0.14),
     borderRadius: radius.pill,
     paddingHorizontal: space.lg,
@@ -1193,7 +1495,7 @@ const styles = StyleSheet.create({
   },
   proposal: {
     marginTop: space.sm,
-    marginLeft: space.lg,
+    marginLeft: INDENT,
     borderWidth: 1,
     borderColor: alpha(palette.accent, 0.4),
     backgroundColor: alpha(palette.accent, 0.06),

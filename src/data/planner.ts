@@ -358,7 +358,7 @@ export async function sendPlannerMessage(
     };
 
     const reply = typeof data.reply === 'string' ? data.reply.trim() : '';
-    if (!reply) return { ok: false, error: 'The System went quiet. Try saying that again.' };
+    if (!reply) return { ok: false, error: 'Beerus went quiet. Try saying that again.' };
 
     return {
       ok: true,
@@ -378,7 +378,7 @@ export async function sendPlannerMessage(
     };
   } catch (err) {
     if (abort.signal.aborted) {
-      return { ok: false, error: 'The System took too long to answer. Try again.' };
+      return { ok: false, error: 'Beerus took too long to answer. Try again.' };
     }
     return {
       ok: false,

@@ -430,7 +430,7 @@ function PrimaryButton({
             transitionDuration: '110ms',
           },
         ]}>
-        <SystemText variant="label" color={palette.bg} style={styles.primaryLabel}>
+        <SystemText variant="button" color={palette.bg} style={styles.primaryLabel}>
           {label}
         </SystemText>
       </Animated.View>
@@ -442,7 +442,7 @@ function GhostButton({ label, onPress }: { label: string; onPress: () => void })
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
       <View style={styles.ghost}>
-        <SystemText variant="label" color={palette.textMuted}>
+        <SystemText variant="button" color={palette.textMuted}>
           {label}
         </SystemText>
       </View>
@@ -519,5 +519,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: space.lg,
   },
-  primaryLabel: { fontSize: 11, letterSpacing: 2 },
+  primaryLabel: {},
 });

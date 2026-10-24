@@ -819,7 +819,7 @@ function SmallButton({
       accessibilityLabel={label.toLowerCase()}
       accessibilityState={{ disabled: Boolean(disabled) }}>
       <View style={[styles.smallButton, { borderColor: alpha(tone, 0.55), opacity: disabled ? 0.45 : 1 }]}>
-        <SystemText variant="label" color={tone} style={styles.smallLabel}>
+        <SystemText variant="button" color={tone} style={styles.smallLabel}>
           {label}
         </SystemText>
       </View>
@@ -864,7 +864,7 @@ function ActionButton({
         ]}>
         {busy ? <ActivityIndicator size="small" color={primary ? palette.bg : palette.text} /> : null}
         <SystemText
-          variant="label"
+          variant="button"
           color={primary ? palette.bg : palette.text}
           style={styles.actionLabel}>
           {label}
@@ -989,5 +989,5 @@ const styles = StyleSheet.create({
   },
   actionGhost: { borderWidth: 1, borderColor: palette.borderStrong },
   actionPrimary: { backgroundColor: palette.accent },
-  actionLabel: { fontSize: 10, letterSpacing: 1.8 },
+  actionLabel: {},
 });

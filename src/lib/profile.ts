@@ -1,7 +1,16 @@
+import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import type { LifeProfile, ProfileDocument, WeeklyBlock } from '@/data/lifeProfile';
+import {
+  DOCUMENT_TYPES,
+  findField,
+  MAX_DOCUMENT_BYTES,
+  valueOf,
+  type LifeProfile,
+  type ProfileDocument,
+  type WeeklyBlock,
+} from '@/data/lifeProfile';
 import { callSystem, type AssistantResult } from '@/lib/assistant';
 
 /**
@@ -72,13 +81,58 @@ export async function readDocumentFile(file: {
   );
   if (!res.ok || !res.data) return { ok: false, error: res.error };
   const document = readDocument(res.data.document);
-  if (!document) return { ok: false, error: 'The System read it, but the answer was not usable.' };
+  if (!document) return { ok: false, error: 'Beerus read it, but the answer was not usable.' };
   const facts = Array.isArray(res.data.facts)
     ? (res.data.facts as Record<string, unknown>[])
         .filter((f) => typeof f?.section === 'string' && typeof f?.field === 'string' && typeof f?.value === 'string')
         .map((f) => ({ section: f.section as string, field: f.field as string, value: f.value as string }))
     : [];
   return { ok: true, data: { document, facts } };
+}
+
+export interface DocumentImport {
+  document: ProfileDocument;
+  /** What changed in the profile, as people read it: "What you study: BSc Computer Science". */
+  changed: string[];
+  /** Writing these puts the profile back the way it was. */
+  undo: ProfileFieldWrite[];
+  /** The profile after the import. */
+  profile: LifeProfile;
+}
+
+/**
+ * Pick a PDF or photo, have it read, and put what it says about the Player
+ * into the profile. The same steps whether it starts on the Profile screen
+ * or from Beerus's Attach button. Resolves to null when the picker was
+ * closed without a file.
+ */
+export async function pickAndImportDocument(profile: LifeProfile, today: string): Promise<AssistantResult<DocumentImport> | null> {
+  const picked = await DocumentPicker.getDocumentAsync({ type: DOCUMENT_TYPES, copyToCacheDirectory: true, multiple: false });
+  if (picked.canceled || !picked.assets?.[0]) return null;
+  const file = picked.assets[0];
+  if (file.size && file.size > MAX_DOCUMENT_BYTES) {
+    return { ok: false, error: 'That file is too big. Keep it under 4 MB: a photo or a one-page PDF is plenty.' };
+  }
+  const mimeType = file.mimeType ?? (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+  const res = await readDocumentFile({ uri: file.uri, name: file.name, mimeType, today });
+  if (!res.ok || !res.data) return { ok: false, error: res.error ?? 'That document could not be read.' };
+  const { document, facts } = res.data;
+
+  const changes = facts.filter((f) => valueOf(profile, f.section, f.field) !== f.value);
+  let next = profile;
+  if (changes.length) {
+    const saved = await saveProfileFields(changes);
+    if (saved.ok && saved.data) next = saved.data;
+  }
+  return {
+    ok: true,
+    data: {
+      document,
+      changed: changes.map((c) => `${findField(c.section, c.field)?.field.label ?? c.field}: ${c.value}`),
+      undo: changes.map((c) => ({ section: c.section, field: c.field, value: valueOf(profile, c.section, c.field) })),
+      profile: next,
+    },
+  };
 }
 
 /* ---------------------------------------------------------------- reading */

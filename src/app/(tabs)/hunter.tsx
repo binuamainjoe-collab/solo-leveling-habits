@@ -5,7 +5,9 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useCallback, useState } from 'react';
 
 import { Card } from '@/components/system/Card';
-import { Screen } from '@/components/system/Screen';
+import { Radar } from '@/components/charts/Radar';
+import { Panel } from '@/components/system/Panel';
+import { Screen, useContentWidth } from '@/components/system/Screen';
 import { MonthCalendar } from '@/components/system/MonthCalendar';
 import { StatusHeader } from '@/components/system/StatusHeader';
 import { SystemText } from '@/components/system/SystemText';
@@ -24,11 +26,15 @@ import { plannerConfigured } from '@/data/planner';
 import { currentSession, listAccounts, signOut, type Account } from '@/lib/auth';
 import { supabaseConfigured } from '@/lib/supabase';
 import { QUESTS } from '@/data/quests';
+import { openAssistant } from '@/lib/assistantBus';
 import { playSound } from '@/lib/feedback';
 import { useProgress } from '@/store/progress';
 
 export default function HunterScreen() {
   const { state, resetAll, setSetting } = useProgress();
+  const { width, wide } = useContentWidth();
+  // The stat furthest behind, for the one button that helps with it.
+  const weakest = STATS.reduce((low, key) => ((state.stats[key] ?? 0) < (state.stats[low] ?? 0) ? key : low), STATS[0]);
 
   const maxCategory = Math.max(...CATEGORIES.map((c) => state.categoryDays[c] ?? 0), 1);
 
@@ -41,28 +47,42 @@ export default function HunterScreen() {
             left, an oversized numeral hard-right, hairline between rows. The
             numbers are the hero here, not the labels. */}
         <Animated.View entering={FadeInDown.duration(360)}>
-          <SystemText variant="label" style={styles.sectionLabel}>
-            Ability scores
-          </SystemText>
-          <Card style={styles.block} contentStyle={styles.ratingInner}>
-            {STATS.map((key, i) => {
-              const meta = statMeta[key];
-              const value = state.stats[key] ?? 0;
-              return (
-                <View key={key} style={[styles.ratingRow, i > 0 && styles.ratingDivider]}>
-                  <SystemText variant="title" color={meta.color} style={styles.ratingGlyph}>
-                    {meta.glyph}
-                  </SystemText>
-                  <SystemText variant="label" style={styles.ratingName}>
-                    {meta.label}
-                  </SystemText>
-                  <SystemText variant="numeral" color={meta.color} style={styles.ratingValue}>
-                    {value}
-                  </SystemText>
-                </View>
-              );
-            })}
-          </Card>
+          <Panel iconName="radar" title="Ability scores" sub="The shape of your training. A dent is a side of life being left behind." style={styles.block}>
+            <View style={[styles.abilities, wide && styles.abilitiesWide]}>
+              <View style={styles.radar}>
+                <Radar
+                  size={Math.min(300, width - 64)}
+                  axes={STATS.map((key) => ({ key, label: statMeta[key].label, value: state.stats[key] ?? 0, color: statMeta[key].color }))}
+                />
+              </View>
+              <View style={styles.ratingList}>
+                {STATS.map((key, i) => {
+                  const meta = statMeta[key];
+                  const value = state.stats[key] ?? 0;
+                  return (
+                    <View key={key} style={[styles.ratingRow, i > 0 && styles.ratingDivider]}>
+                      <SystemText variant="title" color={meta.color} style={styles.ratingGlyph}>
+                        {meta.glyph}
+                      </SystemText>
+                      <SystemText variant="body" color={palette.text} style={styles.ratingName}>
+                        {meta.label}
+                      </SystemText>
+                      <SystemText variant="numeral" color={meta.color} style={styles.ratingValue}>
+                        {value}
+                      </SystemText>
+                    </View>
+                  );
+                })}
+                <GhostButton
+                  label={`Ask Beerus how to raise ${statMeta[weakest].label}`}
+                  onPress={() => {
+                    playSound('tap');
+                    openAssistant('chat', `My weakest stat is ${statMeta[weakest].label} (${state.stats[weakest] ?? 0}). Which quests would raise it, sized for my days?`);
+                  }}
+                />
+              </View>
+            </View>
+          </Panel>
         </Animated.View>
 
         {/* 30-day activity, straight off the day log */}
@@ -207,7 +227,7 @@ export default function HunterScreen() {
           </SystemText>
           <Card style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
-              What The System knows about your life: studies, routine, training, habits, and the
+              What Beerus knows about your life: studies, routine, training, habits, and the
               timetables and documents you gave it. It plans and suggests quests from this.
             </SystemText>
             <GhostButton
@@ -497,7 +517,9 @@ function GhostButton({ label, onPress }: { label: string; onPress: () => void })
             transitionDuration: 110,
           },
         ]}>
-        <SystemText variant="label">{label}</SystemText>
+        <SystemText variant="body" color={palette.text} style={styles.ghostLabel}>
+          {label}
+        </SystemText>
       </Animated.View>
     </Pressable>
   );
@@ -521,7 +543,7 @@ function DangerButton({ onPress }: { onPress: () => void }) {
             transitionDuration: 120,
           },
         ]}>
-        <SystemText variant="label" color={palette.negative}>
+        <SystemText variant="button" color={palette.negative}>
           Reset all progress
         </SystemText>
       </Animated.View>
@@ -537,13 +559,16 @@ const styles = StyleSheet.create({
 
   activityInner: { padding: space.lg },
 
-  ratingInner: { paddingVertical: space.xs, paddingHorizontal: space.lg },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm },
+  abilities: { gap: space.lg },
+  abilitiesWide: { flexDirection: 'row', alignItems: 'center' },
+  radar: { alignItems: 'center' },
+  ratingList: { flex: 1, minWidth: 0, gap: space.sm },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 2 },
   ratingDivider: { borderTopWidth: 1, borderTopColor: palette.border },
   ratingGlyph: { width: 18, fontSize: 14 },
-  ratingName: { flex: 1, fontSize: 11, color: palette.textMuted },
-  // The signature: oversized, hard-right, tight tracking.
-  ratingValue: { fontSize: 42, lineHeight: 48, textAlign: 'right', letterSpacing: -1.5 },
+  ratingName: { flex: 1, fontSize: 15 },
+  // The signature: big figures, hard right.
+  ratingValue: { fontSize: 28, lineHeight: 34, textAlign: 'right' },
 
   recordGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginBottom: space.xl },
   record: { flexGrow: 1, flexBasis: 150, minWidth: 150 },
@@ -579,9 +604,13 @@ const styles = StyleSheet.create({
     borderColor: palette.borderStrong,
     borderRadius: radius.pill,
     alignItems: 'center',
-    paddingVertical: space.md,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: space.lg,
+    marginTop: space.sm,
   },
 
+  ghostLabel: { fontSize: 15, fontWeight: '600', textAlign: 'center' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingVertical: space.sm },
   toggleText: { flex: 1, minWidth: 0 },
   toggleLabel: { fontSize: 15 },

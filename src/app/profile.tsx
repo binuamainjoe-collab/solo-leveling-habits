@@ -1,4 +1,3 @@
-import * as DocumentPicker from 'expo-document-picker';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, TextInput, View } from 'react-native';
@@ -11,21 +10,12 @@ import { Pressable } from '@/components/system/Pressable';
 import { Screen } from '@/components/system/Screen';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
-import {
-  completeness,
-  DAY_LABEL,
-  DOCUMENT_TYPES,
-  LIFE_SECTIONS,
-  MAX_DOCUMENT_BYTES,
-  valueOf,
-  type LifeProfile,
-  type ProfileDocument,
-} from '@/data/lifeProfile';
+import { completeness, DAY_LABEL, LIFE_SECTIONS, valueOf, type LifeProfile, type ProfileDocument } from '@/data/lifeProfile';
 import { currentSession, type Account, listAccounts } from '@/lib/auth';
 import { openAssistant } from '@/lib/assistantBus';
 import { playSound, feedback } from '@/lib/feedback';
 import { liveSupported } from '@/lib/live';
-import { fetchLifeProfile, forgetDocument, readDocumentFile, saveProfileFields, type ProfileFieldWrite } from '@/lib/profile';
+import { fetchLifeProfile, forgetDocument, pickAndImportDocument, saveProfileFields, type ProfileFieldWrite } from '@/lib/profile';
 import { useProgress } from '@/store/progress';
 
 /**
@@ -59,7 +49,7 @@ export default function ProfileScreen() {
         setProfile(res.data.profile);
         setDocuments(res.data.documents);
       } else {
-        setError(res.error ?? 'The System could not load your profile.');
+        setError(res.error ?? 'Beerus could not load your profile.');
       }
       const id = session?.user?.id;
       setAccount(accounts.find((a) => a.id === id) ?? null);
@@ -91,44 +81,21 @@ export default function ProfileScreen() {
     if (reading) return;
     playSound('tap');
     setError(null);
-    const picked = await DocumentPicker.getDocumentAsync({ type: DOCUMENT_TYPES, copyToCacheDirectory: true, multiple: false });
-    if (picked.canceled || !picked.assets?.[0]) return;
-    const file = picked.assets[0];
-    if (file.size && file.size > MAX_DOCUMENT_BYTES) {
-      setError('That file is too big. Keep it under 4 MB — a photo or a one-page PDF is plenty.');
-      return;
-    }
-    const mimeType = file.mimeType ?? (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
     setReading(true);
-    const res = await readDocumentFile({ uri: file.uri, name: file.name, mimeType, today: state.date });
+    // What the document says about the Player goes straight into the
+    // profile, with Undo, since Beerus read it rather than the Player.
+    const res = await pickAndImportDocument(profile, state.date);
+    setReading(false);
+    if (!res) return;
     if (!res.ok || !res.data) {
-      setReading(false);
-      setError(res.error ?? 'The System could not read that document.');
+      setError(res.error ?? 'That document could not be read.');
       return;
     }
-    const { document, facts } = res.data;
-
-    // What the document says about the Player goes straight into the
-    // profile — with Undo, since The System read it, not the Player.
-    const undo = facts.map((f) => ({ section: f.section, field: f.field, value: valueOf(profile, f.section, f.field) }));
-    const changes = facts.filter((f) => valueOf(profile, f.section, f.field) !== f.value);
-    let next = profile;
-    if (changes.length) {
-      const saved = await saveProfileFields(changes);
-      if (saved.ok && saved.data) next = saved.data;
-    }
-    setReading(false);
+    const { document, changed, undo, profile: next } = res.data;
     feedback('complete', 'success');
     setProfile(next);
     setDocuments((d) => [document, ...d]);
-    setLastRead({
-      doc: document,
-      changed: changes.map((c) => {
-        const field = LIFE_SECTIONS.find((s) => s.key === c.section)?.fields.find((f) => f.key === c.field);
-        return `${field?.label ?? c.field}: ${c.value}`;
-      }),
-      undo: undo.filter((u) => changes.some((c) => c.section === u.section && c.field === u.field)),
-    });
+    setLastRead({ doc: document, changed, undo });
   }
 
   async function undoLastRead() {
@@ -180,7 +147,7 @@ export default function ProfileScreen() {
               {account?.name || name}
             </SystemText>
             <SystemText variant="meta" numberOfLines={1}>
-              {account ? account.email : 'Not signed in · kept on this server for The System'}
+              {account ? account.email : 'Not signed in · kept on this server for Beerus'}
             </SystemText>
           </View>
           {!account ? (
@@ -198,7 +165,7 @@ export default function ProfileScreen() {
         <Card style={styles.block} contentStyle={styles.knowBlock}>
           <View style={styles.knowHead}>
             <SystemText variant="body" style={styles.bold}>
-              The System knows {pct}% of your life
+              Beerus knows {pct}% of your life
             </SystemText>
           </View>
           <View style={styles.meter}>
@@ -206,7 +173,7 @@ export default function ProfileScreen() {
           </View>
           <ActionRow
             iconName="live"
-            label="Let The System interview me"
+            label="Let Beerus interview me"
             hint="It asks one question at a time and fills this in."
             onPress={() => openAssistant('interview')}
             primary
