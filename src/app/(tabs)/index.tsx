@@ -15,7 +15,8 @@ import { AreaTrend, shortDate } from '@/components/charts/AreaTrend';
 import { DayStrip, KIND } from '@/components/charts/DayStrip';
 import { HeatMap } from '@/components/charts/HeatMap';
 import { WeekBars } from '@/components/charts/WeekBars';
-import { BalanceRings, GROUP_META } from '@/components/dashboard/BalanceRings';
+import { BalanceRings } from '@/components/dashboard/BalanceRings';
+import { GroupSheet } from '@/components/dashboard/GroupSheet';
 import { TodayHero, type NextStep } from '@/components/dashboard/TodayHero';
 import { QuestCard } from '@/components/quest/QuestCard';
 import { Card } from '@/components/system/Card';
@@ -30,7 +31,6 @@ import {
   balance,
   bestDay,
   compare,
-  GROUP_OF,
   heatmap,
   nextBlock,
   salutation,
@@ -78,7 +78,7 @@ export default function QuestBoardScreen() {
   // Which way the incoming page should slide from, so switching reads as
   // moving between two pages laid side by side, not as content swapping.
   const [direction, setDirection] = useState<1 | -1>(1);
-  /** Body, mind or life: tapping a balance ring narrows the board to it. */
+  /** Body, mind or life: tapping a balance ring opens that group's quests in a sheet. */
   const [group, setGroup] = useState<Group | null>(null);
   /** The day the charts are pointing at. Every chart shares it. */
   const [selected, setSelected] = useState<string>(state.date);
@@ -93,12 +93,11 @@ export default function QuestBoardScreen() {
     const t: QuestDef[] = [];
     const d: QuestDef[] = [];
     for (const q of active) {
-      if (group && GROUP_OF[q.category] !== group) continue;
       if (isComplete(q, state.values[q.id] ?? 0)) d.push(q);
       else t.push(q);
     }
     return { todo: t, done: d };
-  }, [active, state.values, group]);
+  }, [active, state.values]);
 
   const tallies = useMemo(() => balance(active, (q) => isComplete(q, state.values[q.id] ?? 0)), [active, state.values]);
   const week = useMemo(() => thisWeek(log, state.date), [log, state.date]);
@@ -254,7 +253,7 @@ export default function QuestBoardScreen() {
           Today’s quests
         </SystemText>
 
-        <BalanceRings tallies={tallies} selected={group} onSelect={setGroup} />
+        <BalanceRings tallies={tallies} selected={group} onSelect={(g) => setGroup(g)} />
 
         {mandatory.length > 0 ? (
           <View style={[styles.mandatory, { borderColor: alpha(cleared ? palette.positive : palette.negative, 0.35) }]}>
@@ -285,23 +284,6 @@ export default function QuestBoardScreen() {
                 : 'Failure to complete the daily quest will result in an appropriate penalty.'}
             </SystemText>
           </View>
-        ) : null}
-
-        {group ? (
-          <Pressable
-            onPress={() => {
-              playSound('tap');
-              setGroup(null);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={`Showing ${GROUP_META[group].label} quests only. Show all`}>
-            <View style={[styles.filter, { backgroundColor: alpha(GROUP_META[group].color, 0.14) }]}>
-              <SystemText variant="meta" color={palette.text} style={styles.filterText}>
-                Showing {GROUP_META[group].label.toLowerCase()} quests
-              </SystemText>
-              <Icon name="close" size={icon.small} color={palette.text} />
-            </View>
-          </Pressable>
         ) : null}
 
         <PageSwitcher
@@ -441,6 +423,7 @@ export default function QuestBoardScreen() {
           </View>
         </Pressable>
       </ScrollView>
+      <GroupSheet group={group} quests={active} onChange={setGroup} onClose={() => setGroup(null)} />
     </Screen>
   );
 }
@@ -669,16 +652,6 @@ const styles = StyleSheet.create({
   warningTitle: { flex: 1, fontWeight: '700', letterSpacing: 0.4 },
   warningBody: { fontSize: 15, lineHeight: 20, marginTop: space.sm },
 
-  filter: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    minHeight: 36,
-    paddingHorizontal: space.md,
-    borderRadius: radius.pill,
-    marginBottom: space.md,
-  },
   filterText: { fontWeight: '600' },
   best: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 },
 

@@ -54,6 +54,11 @@ const NAMES = {
   down: { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' },
   bolt: { ios: 'bolt', android: 'bolt', web: 'bolt' },
   radar: { ios: 'hexagon', android: 'hexagon', web: 'hexagon' },
+  // The shadows: Beru scouts, Igris judges, the Steward watches.
+  scout: { ios: 'binoculars', android: 'travel_explore', web: 'travel_explore' },
+  judge: { ios: 'checkmark.seal', android: 'gavel', web: 'gavel' },
+  overseer: { ios: 'eye', android: 'visibility', web: 'visibility' },
+  link: { ios: 'link', android: 'link', web: 'link' },
 } satisfies Record<string, Names>;
 
 export type IconName = keyof typeof NAMES;

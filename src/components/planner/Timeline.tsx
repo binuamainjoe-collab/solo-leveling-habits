@@ -48,13 +48,16 @@ export function Timeline({
   plan,
   compact = false,
   live,
+  only,
 }: {
   plan: DraftPlan;
   /** The small version shown inside the chat. */
   compact?: boolean;
   live?: LiveTimeline;
+  /** Show one part of the day only — the one picked on the day clock. */
+  only?: Period | null;
 }) {
-  const groups = groupByPeriod(plan);
+  const groups = groupByPeriod(plan).filter((g) => !only || g.period === only);
   const now = live ? nowPlacement(plan, live.now) : null;
 
   if (compact) return <CompactTimeline plan={plan} />;

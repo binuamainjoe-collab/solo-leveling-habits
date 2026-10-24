@@ -81,6 +81,23 @@ export function daysLeft(deadline: string, today: string): number {
 }
 
 /** "12 days left", "due today", "3 days over". */
+/**
+ * How much of the time between setting a goal and its deadline has gone,
+ * 0–1, for the countdown ring. Null for an open-ended goal.
+ */
+export function timeElapsed(goal: { createdAt: string; deadline: string | null }, today: string): number | null {
+  if (!goal.deadline) return null;
+  const start = goal.createdAt.slice(0, 10);
+  const total = daysLeft(goal.deadline, start);
+  if (total <= 0) return 1;
+  return Math.max(0, Math.min(1, 1 - daysLeft(goal.deadline, today) / total));
+}
+
+/** Whole days since a goal was set: "day 23" of an open-ended goal. */
+export function daysSince(createdAt: string, today: string): number {
+  return Math.max(0, -daysLeft(createdAt.slice(0, 10), today));
+}
+
 export function deadlineLabel(deadline: string, today: string): string {
   const n = daysLeft(deadline, today);
   if (n === 0) return 'due today';

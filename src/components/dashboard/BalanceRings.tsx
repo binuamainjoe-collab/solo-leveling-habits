@@ -14,8 +14,8 @@ export const GROUP_META: Record<Group, { label: string; color: string; hint: str
 };
 
 /**
- * Today split three ways, one ring each. They double as the board's filter:
- * tap Body and the board shows only body quests, tap it again for all.
+ * Today split three ways, one ring each. Tap one to open that group's
+ * quests as cards in a sheet.
  */
 export function BalanceRings({
   tallies,
@@ -24,7 +24,7 @@ export function BalanceRings({
 }: {
   tallies: Record<Group, Tally>;
   selected: Group | null;
-  onSelect: (group: Group | null) => void;
+  onSelect: (group: Group) => void;
 }) {
   return (
     <View style={styles.row}>
@@ -40,11 +40,11 @@ export function BalanceRings({
             disabled={t.total === 0}
             onPress={() => {
               playSound('tap');
-              onSelect(on ? null : g);
+              onSelect(g);
             }}
             accessibilityRole="button"
             accessibilityState={{ selected: on, disabled: t.total === 0 }}
-            accessibilityLabel={`${meta.label}: ${t.done} of ${t.total} done. ${on ? 'Showing only these. Tap to show all' : 'Tap to show only these'}`}>
+            accessibilityLabel={`${meta.label}: ${t.done} of ${t.total} done. Open ${meta.label.toLowerCase()} quests`}>
             <View style={[styles.card, on && { borderColor: meta.color, backgroundColor: alpha(meta.color, 0.08) }, t.total === 0 && styles.empty]}>
               <Ring size={56} stroke={7} ratio={ratio} color={meta.color}>
                 <SystemText variant="meta" color={palette.text} style={styles.pct}>

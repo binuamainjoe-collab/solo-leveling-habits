@@ -104,6 +104,19 @@ export interface Report {
  * template. Worth showing: a fallback means narration failed, and hiding
  * that would make a degraded report look like a normal one.
  */
+/** "now", "40 min", "5 h", "3 d": how long ago, short enough to sit under an icon. */
+export function agoLabel(iso: string | null, now: number = Date.now()): string {
+  if (!iso) return 'never';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return 'never';
+  const mins = Math.max(0, Math.round((now - t) / 60_000));
+  if (mins < 2) return 'now';
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 36) return `${hours} h`;
+  return `${Math.round(hours / 24)} d`;
+}
+
 export function isFallback(report: Report | null): boolean {
   return report?.status === 'fallback';
 }
