@@ -146,7 +146,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       `Rule on each candidate below. Return one ruling per candidate, ` +
       `using the exact id given.\n\n${candidates}`,
     schema: SCHEMA,
-    temperature: 0.3,
   });
 
   // What the call cost, failed or not: a fallback bills both models.

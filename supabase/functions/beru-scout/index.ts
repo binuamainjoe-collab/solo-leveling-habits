@@ -129,7 +129,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     system: SEARCH_SYSTEM,
     prompt: `The goal is: ${goal.title}\n\nSearch now and report what you find.`,
     grounded: true,
-    temperature: 0.4,
   });
 
   // What the search cost, failed or not: a fallback bills both models.
@@ -159,7 +158,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       `Scout report:\n${search.text}\n\n` +
       `Sources found (use these URLs exactly):\n${sourceList}`,
     schema: FINDING_SCHEMA,
-    temperature: 0.2,
   });
 
   // Both model calls are charged to this one run, with every model each one asked.

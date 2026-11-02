@@ -559,7 +559,7 @@ function AssistantSheet({
       return;
     }
     try {
-      callRef.current = await startLiveCall(res.data.token, res.data.model, {
+      callRef.current = await startLiveCall(res.data, {
         onState: (s) => setLiveState(s === 'ended' ? 'off' : s),
         onUserText: (text) => setLiveTurns((t) => addText(t, 'user', text)),
         onModelText: (text) => setLiveTurns((t) => addText(t, 'model', text)),

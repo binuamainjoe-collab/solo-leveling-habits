@@ -1,4 +1,5 @@
 import type { AssistantAction, AssistantMessage, AssistantNow, AssistantReply } from '@/data/assistant';
+import type { LiveSession } from '@/data/live';
 import type { VoiceClip } from '@/lib/voice';
 
 /**
@@ -125,14 +126,14 @@ export async function sendToSystem(
 export async function openLiveCall(
   now: AssistantNow,
   mode: 'chat' | 'interview' = 'chat',
-): Promise<AssistantResult<{ token: string; model: string }>> {
-  const res = await callSystem<{ token?: unknown; model?: unknown }>({ op: 'token', now, mode }, 'live');
+): Promise<AssistantResult<LiveSession>> {
+  const res = await callSystem<{ token?: unknown; model?: unknown; maxMs?: unknown }>({ op: 'token', now, mode }, 'live');
   if (!res.ok || !res.data) return { ok: false, error: res.error };
-  const { token, model } = res.data;
-  if (typeof token !== 'string' || !token || typeof model !== 'string' || !model) {
+  const { token, model, maxMs } = res.data;
+  if (typeof token !== 'string' || !token || typeof model !== 'string' || !model || typeof maxMs !== 'number' || maxMs <= 0) {
     return { ok: false, error: 'Beerus could not open a live call. Try again, or type instead.' };
   }
-  return { ok: true, data: { token, model } };
+  return { ok: true, data: { token, model, maxMs } };
 }
 
 /** Store what was said in a live call, so the next conversation remembers it. */

@@ -457,7 +457,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
-      temperature: 0.6,
       // 'low' rather than the default: a chat reply that takes thirteen
       // seconds is a chat nobody finishes. 'minimal' is not offered on
       // gemini-4-argon or 3.8 Flash and errors.

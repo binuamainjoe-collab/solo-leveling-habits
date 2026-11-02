@@ -179,7 +179,6 @@ export interface GeminiCall {
   audio?: { mimeType: string; data: string };
   /** A document or photo for the model to read (a PDF, a timetable photo). Base64, inline. */
   file?: { mimeType: string; data: string };
-  temperature?: number;
   /**
    * How much reasoning to allow.
    *
@@ -276,7 +275,6 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
       },
     ],
     generationConfig: {
-      temperature: call.temperature ?? 0.6,
       ...(call.thinkingLevel ? { thinkingConfig: { thinkingLevel: call.thinkingLevel } } : {}),
       ...(call.schema
         ? { responseMimeType: 'application/json', responseSchema: call.schema }
