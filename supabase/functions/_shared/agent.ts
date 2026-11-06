@@ -38,7 +38,7 @@ export const DAILY_CAP = 30;
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, x-app-secret',
+  'Access-Control-Allow-Headers': 'content-type, authorization, apikey, x-client-info',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -61,16 +61,46 @@ export function preflight(req: Request): Response | null {
 }
 
 /**
- * The only gate. JWT verification is off for these functions, so this header
- * is what stands between the endpoint and the open internet — backed by the
- * hard cap below, which is what actually limits the damage if the secret
- * leaks out of the bundle it ships in.
+ * Who is calling, and a database client that can only reach their rows.
+ *
+ * The app sends the signed-in account's Supabase session token. The token is
+ * checked with the auth server (the public anon key has no user in it, so it
+ * is refused here), and `db` is built from that same token, so every query
+ * runs as that person: the row rules in the database decide what it can
+ * read or write, and a query that forgets a filter still cannot reach another
+ * account. `sys` is the service role, for the shared daily budgets only;
+ * personal data never goes through it.
+ *
+ * The gateway's own JWT check stays off for these functions because a
+ * browser's CORS preflight carries no token; this is the check instead.
  */
-export function checkSecret(req: Request): Response | null {
-  const expected = Deno.env.get('APP_SECRET');
-  if (!expected) return fail('The System is not configured.', 500);
-  if (req.headers.get('x-app-secret') !== expected) return fail('Not allowed.', 401);
-  return null;
+export interface Caller {
+  userId: string;
+  email: string | null;
+  /** The caller's session token, for passing on to another function. */
+  token: string;
+  db: SupabaseClient;
+  sys: SupabaseClient;
+}
+
+export async function caller(req: Request): Promise<Caller | Response> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const anon = Deno.env.get('SUPABASE_ANON_KEY');
+  const sys = admin();
+  if (!url || !anon || !sys) return fail('The System is not configured.', 500);
+
+  const header = req.headers.get('authorization') ?? '';
+  const token = /^Bearer\s+(.+)$/i.exec(header)?.[1]?.trim() ?? '';
+  if (!token) return fail('Sign in with Google to use this.', 401);
+
+  const { data, error } = await sys.auth.getUser(token);
+  if (error || !data.user) return fail('Your sign-in has expired. Sign in again to carry on.', 401);
+
+  const db = createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  return { userId: data.user.id, email: data.user.email ?? null, token, db, sys };
 }
 
 export function admin(): SupabaseClient | null {

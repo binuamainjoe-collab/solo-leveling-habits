@@ -12,9 +12,8 @@
  */
 
 import {
-  admin,
+  caller,
   claimCalls,
-  checkSecret,
   fail,
   finishRun,
   gemini,
@@ -94,11 +93,14 @@ interface Ruling {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account (Beru passes its caller's session on). `db` reaches
+  // only their goals and findings; `sys` is for the shared daily budget alone.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys } = who;
 
   const { data: goal, error: goalError } = await db
     .from('goals')
@@ -129,7 +131,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ judged: 0, note: 'Nothing left to judge.' });
   }
 
-  const claim = await claimCalls(db, CALL_COST);
+  const claim = await claimCalls(sys, CALL_COST);
   if (!claim.ok) return claim.response;
 
   const runId = await startRun(db, AGENT);

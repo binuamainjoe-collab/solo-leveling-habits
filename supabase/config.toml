@@ -4,39 +4,48 @@
 # separately with `supabase link`.
 project_id = "solo-leveling-habits"
 
+# Every function acts for one signed-in account. Each one checks the caller's
+# Supabase session token itself (`caller()` in _shared/agent.ts; plan-tomorrow
+# keeps its own copy) and then reads and writes with that token, so the row
+# rules in the database limit it to that account's rows. The user id always
+# comes from the verified token, never from the request body.
+#
+# The gateway's JWT check is off for the functions the browser calls with a
+# CORS preflight, because the preflight carries no token; the check in code
+# is the gate. There is no shared app secret any more.
+
 [functions.plan-tomorrow]
-# Predates Google sign-in and is still callable by a signed-out student, so
-# there is no JWT to check. The gate is the `x-app-secret` header plus the
-# server-side daily cap.
 verify_jwt = false
 
-# The two below are the opposite case: they exist to act on behalf of one
-# identified account, so the JWT is the whole point. The user id is always
-# taken from the verified token, never from the request body.
-[functions.google-link]
-verify_jwt = true
+[functions.assistant]
+verify_jwt = false
 
-[functions.google]
-verify_jwt = true
+[functions.live]
+verify_jwt = false
 
-# The shadow army. Same gate as plan-tomorrow: no Supabase users are involved,
-# so there is no JWT to verify — the `x-app-secret` header plus the shared
-# 30-a-day cap is the whole protection.
+[functions.profile]
+verify_jwt = false
+
+[functions.goal-api]
+verify_jwt = false
+
+[functions.log-snapshot]
+verify_jwt = false
+
+# The shadow army. Beru passes its caller's token on when it raises Igris.
 [functions.beru-scout]
 verify_jwt = false
 
 [functions.igris-judge]
 verify_jwt = false
 
-# Not an agent — no model calls, no budget. It exists so the app can reach
-# tables that are service-role only.
-[functions.goal-api]
-verify_jwt = false
-
-# The supervisor and the snapshot sink. Same x-app-secret gate; the cron job
-# that calls steward-report presents the secret from Vault.
+# The supervisor: a report on the signed-in account alone. Email goes only to
+# REPORT_TO_EMAIL, and only for that address's own account.
 [functions.steward-report]
 verify_jwt = false
 
-[functions.log-snapshot]
-verify_jwt = false
+[functions.google-link]
+verify_jwt = true
+
+[functions.google]
+verify_jwt = true

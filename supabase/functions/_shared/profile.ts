@@ -99,10 +99,15 @@ export interface ProfileKnowledge {
   empty: string[];
 }
 
-/** Everything the profile and the documents say, for the prompt of a given day. */
+/**
+ * Everything the profile and the documents say, for the prompt of a given day.
+ *
+ * `db` must be the caller's own client (see `caller()` in agent.ts): the row
+ * rules hand back their profile row and their documents, and nobody else's.
+ */
 export async function loadProfile(db: SupabaseClient, date: string): Promise<ProfileKnowledge> {
   const [profileRes, docsRes] = await Promise.all([
-    db.from('life_profile').select('data').eq('id', 'me').maybeSingle(),
+    db.from('life_profile').select('data').maybeSingle(),
     db
       .from('profile_documents')
       .select('name, kind, summary, weekly, dates')

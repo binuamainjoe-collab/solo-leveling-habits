@@ -1,18 +1,19 @@
 import type { AssistantAction, AssistantMessage, AssistantNow, AssistantReply } from '@/data/assistant';
 import type { LiveSession } from '@/data/live';
+import { sessionHeaders, SIGNED_OUT } from '@/lib/serverAuth';
 import type { VoiceClip } from '@/lib/voice';
 
 /**
  * Talking to The System's assistant function.
  *
- * Same gate as the shadows: the app secret, which ships in the bundle, plus a
- * hard daily cap the server enforces for itself. The conversation and the
- * memory both live on the server, so the phone and the browser share one
- * running conversation.
+ * Every call carries the signed-in account's session (see serverAuth.ts), and
+ * the server answers as that account alone. The conversation and the memory
+ * live on the server under that account, so the phone and the browser share
+ * one running conversation, and nobody else can read it.
  */
 
 const BASE = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SECRET = process.env.EXPO_PUBLIC_APP_SECRET ?? '';
+const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 /** A reply takes a few seconds; anything this long is a dead connection. */
 const TIMEOUT_MS = 45_000;
@@ -20,7 +21,7 @@ const TIMEOUT_MS = 45_000;
 const ACTIONS: AssistantAction[] = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests', 'suggest_quests', 'open_profile'];
 
 export function assistantConfigured(): boolean {
-  return BASE.length > 0 && SECRET.length > 0;
+  return BASE.length > 0 && ANON.length > 0;
 }
 
 export interface AssistantResult<T> {
@@ -35,13 +36,15 @@ export async function callSystem<T>(
   timeoutMs: number = TIMEOUT_MS,
 ): Promise<AssistantResult<T>> {
   if (!assistantConfigured()) return { ok: false, error: 'Beerus has no server to reach yet.' };
+  const auth = await sessionHeaders();
+  if (!auth) return { ok: false, error: SIGNED_OUT };
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   try {
     const res = await fetch(`${BASE}/functions/v1/${fn}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-app-secret': SECRET },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify(body),
       signal: abort.signal,
     });

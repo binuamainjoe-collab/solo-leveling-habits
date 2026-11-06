@@ -51,6 +51,7 @@ import {
   shadowsConfigured,
   type GoalState,
 } from '@/lib/shadows';
+import { useSignedInId } from '@/lib/serverAuth';
 import { useProgress } from '@/store/progress';
 
 /** How loudly each ruling shows: a coloured dot, brightest for a must-read. */
@@ -127,11 +128,15 @@ export default function GoalScreen() {
     setLoading(false);
   }, [configured]);
 
+  // Goals belong to an account, so the screen loads again whenever the
+  // signed-in account changes, and drops what it held for the last one.
+  const account = useSignedInId();
+
   // The first load is written out inline rather than calling `load()`: the
   // state writes then plainly sit after an await, and the screen gets proper
   // cancellation if it unmounts while the request is still in flight.
   useEffect(() => {
-    if (!configured) return;
+    if (!configured || account === undefined) return;
     let alive = true;
 
     (async () => {
@@ -143,16 +148,18 @@ export default function GoalScreen() {
         setState(res.data);
         setError(null);
       } else {
+        // Never leave another account's goals on screen.
+        setState(null);
         setError(res.error ?? 'Your goals could not be loaded.');
       }
-      if (rep.ok) setReport(rep.data ?? null);
+      setReport(rep.ok ? rep.data ?? null : null);
       setLoading(false);
     })();
 
     return () => {
       alive = false;
     };
-  }, [configured]);
+  }, [configured, account]);
 
   async function commitGoal() {
     const check = validateGoalTitle(draft);

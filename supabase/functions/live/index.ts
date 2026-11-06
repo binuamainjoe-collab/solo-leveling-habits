@@ -19,7 +19,7 @@
  *           remember it
  */
 
-import { admin, checkSecret, fail, finishRun, json, preflight, startRun } from '../_shared/agent.ts';
+import { caller, fail, finishRun, json, preflight, startRun } from '../_shared/agent.ts';
 import { CHANGE_FIELDS, CORE, knowledge, nowBlock, OPS, str } from '../_shared/system.ts';
 
 /** Live calls per UTC day. A call is minutes of audio, so this is generous. */
@@ -112,11 +112,14 @@ function toolsFor(model: string) {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account. `db` reaches only their rows, so a call knows and
+  // logs only this person's conversation; `sys` is for the shared budget.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys } = who;
 
   let body: { op?: unknown; now?: unknown; turns?: unknown; mode?: unknown };
   try {
@@ -153,7 +156,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return fail('The System is missing its model key.', 500);
 
-  const { data: claimed, error: claimError } = await db.rpc('bump_pool', { p_pool: 'live', p_limit: LIVE_CAP });
+  const { data: claimed, error: claimError } = await sys.rpc('bump_pool', { p_pool: 'live', p_limit: LIVE_CAP });
   if (claimError) {
     console.error('live budget unreachable', claimError.message);
     return fail('The System could not reach its budget counter. Try again in a minute.', 503);

@@ -288,18 +288,16 @@ export function openingLine(date: string, today: string, weekday: string, existi
 /* ----------------------------------------------------------- the call */
 
 /**
- * Where the edge function lives, and the shared secret it checks.
- *
- * `EXPO_PUBLIC_*` values are inlined into the bundle at build time, so
- * APP_SECRET is readable by anyone who opens devtools on the deployed site.
- * That is accepted: it keeps casual traffic off the endpoint, backed by a
- * hard daily cap on the server. The Gemini key never leaves the function.
+ * Where the edge function lives. Every call carries the signed-in account's
+ * session (see src/lib/serverAuth.ts), and the planner reads only that
+ * account's goals, memories and days. The Gemini key never leaves the
+ * function.
  */
 const PLANNER_URL = process.env.EXPO_PUBLIC_PLANNER_URL ?? '';
-const APP_SECRET = process.env.EXPO_PUBLIC_APP_SECRET ?? '';
+const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export function plannerConfigured(): boolean {
-  return PLANNER_URL.length > 0 && APP_SECRET.length > 0;
+  return PLANNER_URL.length > 0 && ANON.length > 0;
 }
 
 export interface PlannerResult {
@@ -324,6 +322,11 @@ export async function sendPlannerMessage(
   if (!plannerConfigured()) {
     return { ok: false, error: 'The planner is not configured yet.' };
   }
+  // Loaded here rather than at the top: this module is also run under Node
+  // in tests, where the Supabase client (React Native storage) cannot load.
+  const { sessionHeaders, SIGNED_OUT } = await import('@/lib/serverAuth');
+  const auth = await sessionHeaders();
+  if (!auth) return { ok: false, error: SIGNED_OUT };
 
   // A stalled connection would otherwise leave the typing indicator running
   // forever. A planner reply takes a few seconds; forty-five is a dead line.
@@ -333,7 +336,7 @@ export async function sendPlannerMessage(
   try {
     const res = await fetch(PLANNER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ messages, context, repair }),
       signal: abort.signal,
     });

@@ -2,23 +2,15 @@
  * goal-api — how the app reads and writes goals, findings and memories.
  *
  * Not an agent: it makes no model calls and spends none of the daily budget.
- * It exists because these tables are service-role only. The alternative —
- * opening them to the anon key, which ships in the bundle — would put one
- * student's goals behind nothing at all.
+ * Every query runs as the signed-in caller, so the row rules limit it to
+ * their own goals, findings, runs, reports and memories.
  *
- * Several goals can be active at once; exactly one is the focus. The shadows
- * work on the focus, and the planner and the assistant lead with it.
- *
- * Same gate as the shadows: `x-app-secret`, no JWT.
+ * Several goals can be active at once; exactly one of each account's goals is
+ * the focus. The shadows work on the focus, and the planner and the assistant
+ * lead with it.
  */
 
-import {
-  admin,
-  checkSecret,
-  fail,
-  json,
-  preflight,
-} from '../_shared/agent.ts';
+import { caller, fail, json, preflight } from '../_shared/agent.ts';
 
 /** More than this and "focus" stops meaning anything. */
 const MAX_ACTIVE_GOALS = 6;
@@ -44,11 +36,13 @@ function validDate(raw: unknown): string | null {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account; `db` reaches only their rows.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db } = who;
 
   let op = '';
   let args: Record<string, unknown> = {};

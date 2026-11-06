@@ -8,10 +8,11 @@
  *
  * Upsert, not insert: the app calls this several times a day (on accepting a
  * plan, on coming to the foreground, at the midnight rollover) and the last
- * write before the report wins.
+ * write before the report wins. One row per account per day, written as the
+ * signed-in caller.
  */
 
-import { admin, checkSecret, fail, json, preflight } from '../_shared/agent.ts';
+import { caller, fail, json, preflight } from '../_shared/agent.ts';
 
 function int(v: unknown, min = 0, max = 100_000): number {
   const n = Math.round(Number(v));
@@ -25,11 +26,13 @@ function dateOrNull(v: unknown): string | null {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing.', 500);
+  // The signed-in account; `db` reaches only their rows.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, userId } = who;
 
   let body: Record<string, unknown>;
   try {
@@ -51,6 +54,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     : [];
 
   const row = {
+    user_id: userId,
     date,
     xp_gained: int(body.xp_gained, 0, 1_000_000),
     level: int(body.level, 1, 999),
@@ -65,7 +69,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await db.from('daily_snapshots').upsert(row, { onConflict: 'date' });
+  const { error } = await db.from('daily_snapshots').upsert(row, { onConflict: 'user_id,date' });
   if (error) {
     console.error('snapshot upsert failed', error.message);
     return fail('The System could not record today.', 500);

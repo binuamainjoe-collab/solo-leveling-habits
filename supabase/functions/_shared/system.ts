@@ -152,7 +152,12 @@ export interface Knowledge {
 
 const MAX_MEMORIES_IN = 40;
 
-/** Everything the System knows from the database, gathered in one pass. */
+/**
+ * Everything the System knows about one account, gathered in one pass.
+ *
+ * `db` must be the caller's own client (see `caller()` in agent.ts), so the
+ * row rules limit every read below to that account.
+ */
 export async function knowledge(db: SupabaseClient, today: string, historyLimit: number): Promise<Knowledge> {
   const [profile, goalsRes, memRes, forgottenRes, snapRes, historyRes] = await Promise.all([
     loadProfile(db, today),

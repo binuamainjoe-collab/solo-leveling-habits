@@ -16,7 +16,7 @@
  * catalogue, every block's day and times are checked before they are stored.
  */
 
-import { admin, checkSecret, fail, finishRun, gemini, json, MODEL, parseJson, preflight, startRun, claimCalls } from '../_shared/agent.ts';
+import { caller, claimCalls, fail, finishRun, gemini, json, MODEL, parseJson, preflight, startRun } from '../_shared/agent.ts';
 import { CATALOG, cleanValue, isField, sanitize, type LifeProfile, type WeeklyBlock } from '../_shared/profile.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
@@ -119,17 +119,21 @@ function cleanDates(raw: unknown): { date: string; title: string }[] {
     .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.date) && !Number.isNaN(Date.parse(x.date)) && x.title);
 }
 
+/** The caller's profile row; `db` is their own client, so it is the only one it can see. */
 async function readProfile(db: SupabaseClient): Promise<LifeProfile> {
-  const { data } = await db.from('life_profile').select('data').eq('id', 'me').maybeSingle();
+  const { data } = await db.from('life_profile').select('data').maybeSingle();
   return sanitize(data?.data);
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account. `db` reaches only their rows; `sys` is for the
+  // shared daily budget alone.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys, userId } = who;
 
   let body: Record<string, unknown>;
   try {
@@ -179,7 +183,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (changed > 0) {
       const { error } = await db
         .from('life_profile')
-        .upsert({ id: 'me', data: profile, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+        .upsert({ user_id: userId, data: profile, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
       if (error) {
         console.error('profile save failed', error.message);
         return fail('The System could not save your profile.', 500);
@@ -208,7 +212,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 2000))) return fail('That file was not readable.', 400);
 
     // Reading a document is a model call: it draws on the shadows' budget.
-    const claim = await claimCalls(db, 1);
+    const claim = await claimCalls(sys, 1);
     if (!claim.ok) return claim.response;
 
     const runId = await startRun(db, 'profile-document');

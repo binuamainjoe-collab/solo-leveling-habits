@@ -10,24 +10,24 @@ import type {
   Verdict,
 } from '@/data/agents';
 import type { Goal, Memory, MemoryKind } from '@/data/goals';
+import { sessionHeaders, SIGNED_OUT } from '@/lib/serverAuth';
 
 /**
  * Talking to the shadow army.
  *
- * Every call carries the app secret, which is compiled into the bundle and so
- * is public in practice. It keeps crawlers off the endpoints; the real
- * protection is the thirty-calls-a-day cap the server enforces for itself.
+ * Every call carries the signed-in account's session (see serverAuth.ts), so
+ * the shadows work on that account's goals and nobody else's. Signed out,
+ * nothing is sent and the screen says to sign in.
  *
  * Unset the two environment variables and `shadowsConfigured()` is false, the
- * Goal screen says so plainly, and nothing here is ever called. That is the
- * state the app ships in until the Supabase project exists.
+ * Goal screen says so plainly, and nothing here is ever called.
  */
 
 const BASE = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SECRET = process.env.EXPO_PUBLIC_APP_SECRET ?? '';
+const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export function shadowsConfigured(): boolean {
-  return BASE.length > 0 && SECRET.length > 0;
+  return BASE.length > 0 && ANON.length > 0;
 }
 
 export interface ShadowResult<T> {
@@ -41,11 +41,13 @@ async function call<T>(fn: string, body: unknown): Promise<ShadowResult<T>> {
   if (!shadowsConfigured()) {
     return { ok: false, error: 'The System has no server to reach yet.' };
   }
+  const auth = await sessionHeaders();
+  if (!auth) return { ok: false, error: SIGNED_OUT };
 
   try {
     const res = await fetch(`${BASE}/functions/v1/${fn}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-app-secret': SECRET },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify(body ?? {}),
     });
 

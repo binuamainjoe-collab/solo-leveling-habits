@@ -13,8 +13,7 @@
  */
 
 import {
-  admin,
-  checkSecret,
+  caller,
   claimCalls,
   fail,
   finishRun,
@@ -70,8 +69,11 @@ interface RunRow {
  * Columns are named explicitly rather than selected with `*`: that is what
  * guarantees a secret can never find its way into `reports.facts`, no matter
  * what someone adds to a table later.
+ *
+ * `db` is the caller's own client, so the runs, goal, findings and days are
+ * theirs alone. `sys` reads only the shared call counter.
  */
-async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
+async function collectFacts(db: SupabaseClient, sys: SupabaseClient, date: string): Promise<Facts> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const [runsRes, usageRes, goalRes, findingsRes, snapsRes] = await Promise.all([
@@ -79,7 +81,7 @@ async function collectFacts(db: SupabaseClient, date: string): Promise<Facts> {
       .from('agent_runs')
       .select('agent, status, error, duration_ms, tokens_in, tokens_out, tokens_thoughts, model')
       .gte('started_at', since),
-    db.from('usage').select('calls').eq('day', date).maybeSingle(),
+    sys.from('usage').select('calls').eq('day', date).maybeSingle(),
     db.from('goals').select('title').eq('focus', true).maybeSingle(),
     db
       .from('findings')
@@ -218,10 +220,15 @@ async function sendEmail(
   subject: string,
   html: string,
   text: string,
+  /** The signed-in account's address. */
+  owner: string | null,
 ): Promise<{ id?: string; error?: string; skipped?: boolean }> {
   const key = Deno.env.get('RESEND_API_KEY');
   const to = Deno.env.get('REPORT_TO_EMAIL');
   if (!key || !to) return { skipped: true };
+  // The inbox is the developer's own. Anyone else's report stays in the app,
+  // where only they can read it, and is never mailed to someone else.
+  if (!owner || owner.trim().toLowerCase() !== to.trim().toLowerCase()) return { skipped: true };
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -247,11 +254,14 @@ async function sendEmail(
 /* ------------------------------------------------------------- the shell */
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing.', 500);
+  // The signed-in account. The report is about them alone: `db` reaches only
+  // their rows; `sys` is for the shared daily budget and call counter.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys, email } = who;
 
   let force = false;
   let forceFallback = false;
@@ -262,7 +272,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // a secret in the dashboard.
     forceFallback = body.force_fallback === true;
   } catch {
-    // An empty body is how cron calls it.
+    // An empty body is a plain daily run.
   }
 
   const now = new Date();
@@ -286,7 +296,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // ------------------------------------------------------------ 2 & 3
   let facts: Facts;
   try {
-    facts = await collectFacts(db, decision.date);
+    facts = await collectFacts(db, sys, decision.date);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'fact collection failed';
     await finishRun(db, runId, 'error', null, message);
@@ -317,7 +327,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // share of the budget. Claiming per attempt also means the retry costs
       // exactly one more, and a day with nothing left falls through to the
       // template — which is precisely the day a report is worth having.
-      const claim = await claimCalls(db, 1);
+      const claim = await claimCalls(sys, 1);
       if (!claim.ok) {
         narrationError =
           narrationError ?? `daily cap of ${DAILY_CAP} reached; narration skipped`;
@@ -361,7 +371,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // --------------------------------------------------------- 6 & 7
   const mail = renderEmail(facts, narration, anomalies);
-  const sent = await sendEmail(mail.subject, mail.html, mail.text);
+  const sent = await sendEmail(mail.subject, mail.html, mail.text, email);
 
   // A send that fails is worth recording, but the report itself still
   // exists and the app can still show it — so the status stays a statement

@@ -21,8 +21,7 @@
  */
 
 import {
-  admin,
-  checkSecret,
+  caller,
   fail,
   finishRun,
   gemini,
@@ -198,11 +197,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // The app stops listening 45 s after it sent this; everything below is
   // timed against that.
   const requestStart = Date.now();
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account. `db` reaches only their rows; `sys` is for the
+  // shared daily budget alone.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys } = who;
 
   let body: { op?: unknown; text?: unknown; now?: unknown; audio?: unknown; mode?: unknown };
   try {
@@ -243,7 +245,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   if (!typed && !audio) return fail('Say something to The System first.', 400);
 
-  const { data: claimed, error: claimError } = await db.rpc('bump_pool', {
+  const { data: claimed, error: claimError } = await sys.rpc('bump_pool', {
     p_pool: 'assistant',
     p_limit: ASSISTANT_CAP,
   });
@@ -308,7 +310,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // The Flash fallback is a second billed request, so it takes a second
     // place in today's pool; with none left, the turn fails as it would have.
     claimFallback: async () => {
-      const { data, error } = await db.rpc('bump_pool', { p_pool: 'assistant', p_limit: ASSISTANT_CAP });
+      const { data, error } = await sys.rpc('bump_pool', { p_pool: 'assistant', p_limit: ASSISTANT_CAP });
       return !error && data !== null;
     },
   });

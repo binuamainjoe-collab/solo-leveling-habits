@@ -139,12 +139,12 @@ const RESPONSE_SCHEMA = {
 
 /**
  * The app is served from Netlify, so every real call is cross-origin. Without
- * `x-app-secret` named here the browser refuses the preflight.
+ * `authorization` named here the browser refuses the preflight.
  */
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, x-app-secret',
+  'Access-Control-Allow-Headers': 'content-type, authorization, apikey, x-client-info',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -296,28 +296,55 @@ async function claimCall(): Promise<{ ok: true } | { ok: false; status: number; 
   return { ok: true };
 }
 
+/* --------------------------------------------------------------- caller */
+
+/**
+ * Who is calling: the signed-in account behind the Supabase session token the
+ * app sends. Checked with the auth server, so the public anon key (which has
+ * no user in it) is refused. The same as `caller()` in `_shared/agent.ts`,
+ * kept here because the planner stays self-contained.
+ */
+async function signedIn(req: Request): Promise<{ token: string } | Response> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key || !Deno.env.get('SUPABASE_ANON_KEY')) return fail('The planner is not wired up correctly.', 500);
+
+  const token = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1]?.trim() ?? '';
+  if (!token) return fail('Sign in with Google to use the planner.', 401);
+
+  const { data, error } = await createClient(url, key, { auth: { persistSession: false } }).auth.getUser(token);
+  if (error || !data.user) return fail('Your sign-in has expired. Sign in again to carry on.', 401);
+  return { token };
+}
+
 /* ------------------------------------------------------------ knowledge */
 
 /**
- * What the System already knows, read straight from the database: every
- * active goal and which is the focus, the focus goal's best unread findings,
- * the memories the assistant has kept, and the last week of days.
+ * What the System already knows about the signed-in account, read straight
+ * from the database: every active goal and which is the focus, the focus
+ * goal's best unread findings, the memories the assistant has kept, and the
+ * last week of days.
  *
- * Best effort by design. Each read that fails becomes an empty section, so a
- * slow or broken table never stops tonight's plan from being made.
+ * Every read carries the caller's own session token, so the row rules limit
+ * it to their rows. Best effort by design: each read that fails becomes an
+ * empty section, so a slow or broken table never stops tonight's plan.
  */
-async function knowledge(today: string, planDate: string): Promise<string> {
+async function knowledge(token: string, today: string, planDate: string): Promise<string> {
   const url = Deno.env.get('SUPABASE_URL');
-  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!url || !key) return '';
+  const anon = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!url || !anon) return '';
 
   // The life profile and the timetable for the day being planned.
-  const profile = await loadProfile(createClient(url, key, { auth: { persistSession: false } }), planDate).catch(() => null);
+  const asCaller = createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const profile = await loadProfile(asCaller, planDate).catch(() => null);
 
   const read = async <T>(path: string): Promise<T[]> => {
     try {
       const res = await fetch(`${url}/rest/v1/${path}`, {
-        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        headers: { apikey: anon, Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return [];
       const rows = (await res.json()) as unknown;
@@ -413,9 +440,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST') return fail('Use POST.', 405);
 
-  const expected = Deno.env.get('APP_SECRET');
-  if (!expected) return fail('APP_SECRET is not set on this project.', 500);
-  if (req.headers.get('x-app-secret') !== expected) return fail('Not allowed.', 401);
+  // The signed-in account; every database read below is theirs alone.
+  const who = await signedIn(req);
+  if (who instanceof Response) return who;
 
   const geminiKey = Deno.env.get('GEMINI_API_KEY');
   if (!geminiKey) return fail('GEMINI_API_KEY is not set on this project.', 500);
@@ -443,7 +470,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const system = [
     SYSTEM,
     contextBlock(body.context),
-    await knowledge(today, /^\d{4}-\d{2}-\d{2}$/.test(str(ctx.date, 10)) ? str(ctx.date, 10) : today),
+    await knowledge(who.token, today, /^\d{4}-\d{2}-\d{2}$/.test(str(ctx.date, 10)) ? str(ctx.date, 10) : today),
     repair.length
       ? `REPAIR\nThe student tried to finalize and the draft was rejected for these reasons. Fix exactly these, keep everything else, set wants_finalize to true, and say in one short line what you changed:\n- ${repair.join('\n- ')}`
       : '',

@@ -30,9 +30,8 @@
 
 import {
   addUsage,
-  admin,
+  caller,
   claimCalls,
-  checkSecret,
   fail,
   finishRun,
   gemini,
@@ -124,11 +123,14 @@ function str(v: unknown, max: number): string {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const early = preflight(req) ?? checkSecret(req);
+  const early = preflight(req);
   if (early) return early;
 
-  const db = admin();
-  if (!db) return fail('The System is not configured.', 500);
+  // The signed-in account. `db` reaches only their goals, findings, profile
+  // and memories; `sys` is for the shared daily budget alone.
+  const who = await caller(req);
+  if (who instanceof Response) return who;
+  const { db, sys, token } = who;
 
   const { data: goal, error: goalError } = await db
     .from('goals')
@@ -142,7 +144,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   if (!goal) return fail('Set a focus goal before sending Beru out.', 409);
 
-  const claim = await claimCalls(db, CALL_COST);
+  const claim = await claimCalls(sys, CALL_COST);
   if (!claim.ok) return claim.response;
 
   const runId = await startRun(db, AGENT);
@@ -153,7 +155,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Plain reads, no model call. One that fails leaves its part of the brief
   // out: a thinner brief beats no run.
   const [profileRes, memoryRes, onFileRes] = await Promise.all([
-    db.from('life_profile').select('data').eq('id', 'me').maybeSingle(),
+    db.from('life_profile').select('data').maybeSingle(),
     db
       .from('memories')
       .select('kind, content, goal_id')
@@ -332,13 +334,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (added > 0) {
     try {
       const base = Deno.env.get('SUPABASE_URL');
-      const secret = Deno.env.get('APP_SECRET');
       // Waited on only while this run is inside the edge function's time
       // limit; past that, the findings stay saved and "waiting on a ruling".
       const left = EDGE_LIMIT_MS - 10_000 - (Date.now() - runStart);
+      // Igris judges as the same account, with the same session token, so it
+      // can only reach the findings this run just stored.
       const res = await fetch(`${base}/functions/v1/igris-judge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-secret': secret ?? '' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ raisedBy: AGENT }),
         signal: AbortSignal.timeout(Math.max(1_000, left)),
       });
