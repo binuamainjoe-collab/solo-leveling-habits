@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The System · Privacy</title>
+<meta name="description" content="How The System uses your Google account, Calendar and Tasks.">
+<meta name="theme-color" content="#120e0c">
+<style>
+  :root { color-scheme: dark; --bg: #120e0c; --ink: #f3ebe4; --soft: #b9aca2; --ember: #ff7a1a; --line: #2b221d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 16px 64px; }
+  .kicker { color: var(--ember); font-size: 13px; font-weight: 700; letter-spacing: .04em; margin: 0; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 6px 0 8px; letter-spacing: .01em; text-transform: uppercase; }
+  h2 { font-size: 18px; margin: 32px 0 6px; }
+  p, li { color: var(--soft); }
+  strong { color: var(--ink); font-weight: 600; }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  a { color: var(--ember); }
+  .date { font-size: 14px; margin: 0 0 24px; }
+  footer { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="kicker">The System</p>
+  <h1>Privacy</h1>
+  <p class="date">Last updated 6 November 2026</p>
+
+  <p>The System is a personal habit and planning app. It is run by one person for their own use, has no ads and sells nothing. This page explains what it does with your Google account.</p>
+
+  <h2>What it asks Google for</h2>
+  <ul>
+    <li><strong>Your name, email address and profile picture</strong>, so the same record follows you between your phone and the browser.</li>
+    <li><strong>Google Calendar events</strong>: it reads the events on the days it plans, so the plan fits around them, and adds an event when you ask it to put something in your calendar.</li>
+    <li><strong>Google Tasks</strong>: it reads your task lists and open tasks, adds tasks you ask for, and marks a task done when you finish it in the app.</li>
+  </ul>
+  <p>It never asks for access to Gmail and cannot read your mail.</p>
+
+  <h2>Where your data is kept</h2>
+  <p>Your habits, quests, goals, plans and the profile you fill in are stored in a database hosted by <strong>Supabase</strong>. The key that lets the app reach your Calendar and Tasks is kept there too, on the server; the app in your browser never holds a Google token. The website itself is hosted by <strong>Netlify</strong>.</p>
+
+  <h2>Who else sees it</h2>
+  <p>The planner, the assistant and the Goal agents are powered by <strong>Google's Gemini API</strong>. To write a plan, the app sends Gemini the events and open tasks for the day being planned, together with your own records and profile. During a live voice call, your microphone audio goes to Gemini for the length of the call. Nothing is shared with anyone else, and nothing is used for advertising.</p>
+  <p>The System's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <h2>Removing access and data</h2>
+  <p>You can cut the app off from your Google account at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. Removing an account inside the app only removes it from that device. To have your stored data deleted, email the address below.</p>
+
+  <footer>
+    <p>Questions: <a href="mailto:binuamainjoe@gmail.com">binuamainjoe@gmail.com</a> · <a href="/">Open The System</a></p>
+  </footer>
+</main>
+</body>
+</html>
