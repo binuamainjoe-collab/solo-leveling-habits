@@ -191,7 +191,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     prompt: brief,
     grounded: true,
     readPages: true,
-    temperature: 0.4,
     thinkingLevel: 'low',
     tier: 'fast',
     budgetMs: SEARCH_BUDGET_MS,
@@ -230,7 +229,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       `Scout report:\n${search.text}\n\n` +
       `Sources (copy each URL exactly from this list):\n${sourceLines(sources)}`,
     schema: FINDING_SCHEMA,
-    temperature: 0.2,
     thinkingLevel: 'low',
     tier: 'fast',
     budgetMs: STRUCTURE_BUDGET_MS,

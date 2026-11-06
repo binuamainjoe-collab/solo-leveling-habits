@@ -290,7 +290,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     system: SYSTEM,
     prompt,
     schema: RESPONSE_SCHEMA,
-    temperature: 0.7,
     thinkingLevel: 'low',
     audio,
     // Typed and spoken both go to the flagship first, with Flash behind it

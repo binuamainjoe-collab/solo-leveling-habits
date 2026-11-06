@@ -11,12 +11,38 @@ export const IN_RATE = 16_000;
 export const OUT_RATE = 24_000;
 /** Microphone audio goes up in 100 ms chunks: small enough to feel live, big enough not to flood the socket. */
 export const CHUNK_SAMPLES = IN_RATE / 10;
+/** Audio chunks held while the call moves between connections: five seconds. */
+export const MAX_BACKLOG = 50;
+
+/** What the live function hands the app to open a call. */
+export interface LiveSession {
+  token: string;
+  model: string;
+  /** How long the call may run. The app ends it there, with a message. */
+  maxMs: number;
+}
 
 export function liveUrl(token: string): string {
   return (
     'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained' +
     `?access_token=${encodeURIComponent(token)}`
   );
+}
+
+/**
+ * The first message on every connection. The token supplies the rest of the
+ * setup and overrides anything else sent here, so the only thing the app adds
+ * is sessionResumption: empty to start the session, or the handle to carry on
+ * from.
+ */
+export function setupMessage(model: string, handle: string | null) {
+  return { setup: { model: `models/${model}`, sessionResumption: handle ? { handle } : {} } };
+}
+
+/** A protobuf Duration as JSON ("57s", "1.5s") in milliseconds; null if it is not one. */
+export function durationMs(value: unknown): number | null {
+  const match = typeof value === 'string' ? /^(\d+(?:\.\d+)?)s$/.exec(value) : null;
+  return match ? Math.round(Number(match[1]) * 1000) : null;
 }
 
 /* ------------------------------------------------------------------ audio */

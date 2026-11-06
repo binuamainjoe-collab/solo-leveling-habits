@@ -184,9 +184,8 @@ async function narrate(
     system: STEWARD_SYSTEM,
     prompt: `FACTS:\n${JSON.stringify(facts, null, 2)}${retryNote}`,
     schema: NARRATION_SCHEMA,
-    temperature: 0.3,
     // 'minimal' errors on 3.8 Flash; 'low' is the cheap, fast setting, and
-    // omitting it would silently default to 'high'.
+    // omitting it would silently default to 'medium'.
     thinkingLevel: 'low',
   });
 

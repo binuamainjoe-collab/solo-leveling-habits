@@ -217,7 +217,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       prompt: `Today is ${today}. The file is called "${name}". Read it.`,
       file: { mimeType, data },
       schema: READ_SCHEMA,
-      temperature: 0.1,
     });
     const spend = { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL };
     if (!result.ok || !result.text) {

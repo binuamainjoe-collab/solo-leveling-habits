@@ -32,9 +32,34 @@ const MODEL_ID = /^[a-z0-9][a-z0-9.-]{2,63}$/;
 /** A deep, even voice for The System. */
 const VOICE = 'Charon';
 
-/** How long the token may open a session, and how long a session may run. */
+/**
+ * How long the token may open a session, and how long a session may run. The
+ * app ends a call at SESSION_MAX_MS; the token outlives that by the start
+ * window, so a call opened late in it can still reconnect right to the end.
+ */
 const START_WITHIN_MS = 2 * 60_000;
 const SESSION_MAX_MS = 30 * 60_000;
+
+/**
+ * The setup fields the token decides, whatever the browser sends: all of
+ * them but sessionResumption. A token with no field mask ignores the
+ * browser's setup completely, and the browser alone holds the handle that
+ * carries a call from one connection to the next, so without this mask every
+ * reconnect would silently start a new session with no memory of the call.
+ */
+const LOCKED_SETUP_FIELDS = [
+  'model',
+  'generationConfig',
+  'systemInstruction',
+  'tools',
+  'realtimeInputConfig',
+  'contextWindowCompression',
+  'inputAudioTranscription',
+  'outputAudioTranscription',
+  'proactivity',
+  'historyConfig',
+  'labels',
+].join(',');
 
 const HISTORY_FOR_CALL = 12;
 const MAX_LOG_TURNS = 60;
@@ -54,27 +79,37 @@ ${OPS}
 - Profile updates (set_profile) are the exception to asking first: when the Player tells you something lasting about their life, save it at once.
 - Never say you changed something unless apply_changes reported it as applied.`;
 
-const TOOLS = [
-  {
-    functionDeclarations: [
-      {
-        name: 'apply_changes',
-        description:
-          'Change the app: quest targets, the quest board, today\'s progress, the daily schedule, goals, the Player\'s profile. Call only when the Player asked for the change or agreed to it (profile updates excepted).',
-        parameters: {
-          type: 'object',
-          properties: {
-            changes: {
-              type: 'array',
-              items: { type: 'object', properties: CHANGE_FIELDS, required: ['op'] },
+/**
+ * apply_changes blocks: what The System says next depends on the app's answer,
+ * and the app can refuse. Without it the model could report a change as made
+ * before knowing it was, which LIVE_RULES forbids. The app answers in moments,
+ * so nobody is left waiting. The extended-thinking model takes NON_BLOCKING
+ * only and errors on anything else, so GEMINI_MODEL_LIVE can still move there.
+ */
+function toolsFor(model: string) {
+  return [
+    {
+      functionDeclarations: [
+        {
+          name: 'apply_changes',
+          behavior: model.includes('extended-thinking') ? 'NON_BLOCKING' : 'BLOCKING',
+          description:
+            'Change the app: quest targets, the quest board, today\'s progress, the daily schedule, goals, the Player\'s profile. Call only when the Player asked for the change or agreed to it (profile updates excepted).',
+          parameters: {
+            type: 'object',
+            properties: {
+              changes: {
+                type: 'array',
+                items: { type: 'object', properties: CHANGE_FIELDS, required: ['op'] },
+              },
             },
+            required: ['changes'],
           },
-          required: ['changes'],
         },
-      },
-    ],
-  },
-];
+      ],
+    },
+  ];
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const early = preflight(req) ?? checkSecret(req);
@@ -157,10 +192,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
       uses: 1,
-      expireTime: new Date(nowMs + SESSION_MAX_MS).toISOString(),
+      expireTime: new Date(nowMs + START_WITHIN_MS + SESSION_MAX_MS).toISOString(),
       newSessionExpireTime: new Date(nowMs + START_WITHIN_MS).toISOString(),
       // Locked into the token: the browser cannot change the model, the
       // prompt or the tools, whatever it sends.
+      fieldMask: LOCKED_SETUP_FIELDS,
       bidiGenerateContentSetup: {
         model: `models/${model}`,
         generationConfig: {
@@ -168,7 +204,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } },
         },
         systemInstruction: { parts: [{ text: system }] },
-        tools: TOOLS,
+        tools: toolsFor(model),
+        // Without this, an audio session stops at 15 minutes. The oldest
+        // turns go first; the system prompt always stays.
+        contextWindowCompression: { slidingWindow: {} },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
       },
@@ -193,5 +232,5 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   await finishRun(db, runId, 'ok', 'live call opened', null, { model });
-  return json({ token, model, expiresAt: new Date(nowMs + SESSION_MAX_MS).toISOString() });
+  return json({ token, model, maxMs: SESSION_MAX_MS });
 });

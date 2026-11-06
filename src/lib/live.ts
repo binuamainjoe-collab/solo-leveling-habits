@@ -3,13 +3,27 @@ import {
   bytesToBase64,
   CHUNK_SAMPLES,
   downsample,
+  durationMs,
   floatToPcm16,
   IN_RATE,
   liveUrl,
+  MAX_BACKLOG,
   OUT_RATE,
   pcm16ToFloat,
+  setupMessage,
+  type LiveSession,
 } from '@/data/live';
 import { voiceLevel } from '@/lib/beerus';
+
+/**
+ * How many times in a row a lost connection is tried again before the call
+ * gives up, and how much longer each wait is: about 15 s in all, which rides
+ * out a Wi-Fi handover. A session stays resumable for far longer than that.
+ */
+const REJOIN_TRIES = 5;
+const REJOIN_STEP_MS = 1_500;
+/** Move this long before Gemini cuts a connection it warned about. */
+const CUT_MARGIN_MS = 2_000;
 
 /**
  * A live voice call with The System, in the browser.
@@ -20,6 +34,11 @@ import { voiceLevel } from '@/lib/beerus';
  * dropped at once, so it really stops. Tool calls (The System changing the
  * app) are handed to the caller, who checks and applies them and says what
  * happened.
+ *
+ * Gemini ends each connection after about ten minutes, so a long call is
+ * several connections, each resuming the session from the last handle Gemini
+ * gave. The Player should not notice: the microphone, the playback queue and
+ * the transcript all carry straight on.
  *
  * Web only: it needs getUserMedia, Web Audio and a raw WebSocket, none of
  * which Expo Go offers for live audio.
@@ -73,8 +92,7 @@ registerProcessor('system-capture', Capture);
 `;
 
 export async function startLiveCall(
-  token: string,
-  model: string,
+  { token, model, maxMs }: LiveSession,
   handlers: LiveHandlers,
   /** What tells The System the call has opened, and why. */
   opening = '(The Player just opened a live voice call.)',
@@ -93,10 +111,28 @@ export async function startLiveCall(
   const playing = new Set<AudioBufferSourceNode>();
   let playAt = 0;
   let pending = new Float32Array(0);
+  /** The latest point this session can be resumed from. */
+  let handle: string | null = null;
+  /** The first connection is up: the microphone is on and the greeting went out. */
+  let started = false;
+  /** This connection finished its setup, so it can take audio. */
+  let ready = false;
+  /** Mid-exchange: the Player is talking or The System is answering. */
+  let busy = false;
+  /** Gemini warned this connection is ending; move at the next quiet moment. */
+  let leaving = false;
+  let tries = 0;
+  let backlog: unknown[] = [];
+  let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let limitTimer: ReturnType<typeof setTimeout> | undefined;
 
   const finish = (error?: string) => {
     if (ended) return;
     ended = true;
+    clearTimeout(leaveTimer);
+    clearTimeout(retryTimer);
+    clearTimeout(limitTimer);
     node?.port.close();
     node?.disconnect();
     stream?.getTracks().forEach((t) => t.stop());
@@ -153,7 +189,10 @@ export async function startLiveCall(
     let offset = 0;
     while (joined.length - offset >= CHUNK_SAMPLES) {
       const chunk = joined.subarray(offset, offset + CHUNK_SAMPLES);
-      send({ realtimeInput: { audio: { data: bytesToBase64(floatToPcm16(chunk)), mimeType: `audio/pcm;rate=${IN_RATE}` } } });
+      const message = { realtimeInput: { audio: { data: bytesToBase64(floatToPcm16(chunk)), mimeType: `audio/pcm;rate=${IN_RATE}` } } };
+      if (ready) send(message);
+      // Between two connections: held, so words said in the gap still arrive.
+      else backlog = [...backlog.slice(1 - MAX_BACKLOG), message];
       offset += CHUNK_SAMPLES;
     }
     pending = joined.slice(offset);
@@ -194,8 +233,52 @@ export async function startLiveCall(
     source.connect(micTap);
   }
 
-  async function onMessage(ev: MessageEvent) {
+  /** One connection of the call. A replaced connection has nothing left to say. */
+  function connect() {
+    leaving = false;
+    ready = false;
+    busy = false;
+    clearTimeout(leaveTimer);
+    let failed = false;
+    const socket = new WebSocket(liveUrl(token));
+    ws = socket;
+    socket.onmessage = (ev) => void onMessage(ev, socket);
+    socket.onerror = () => {
+      failed = true;
+    };
+    socket.onclose = (ev) => {
+      if (ended || socket !== ws) return;
+      ready = false;
+      // With a handle there is a session to go back to, so a lost connection
+      // need not end the call.
+      if (handle && tries < REJOIN_TRIES) {
+        retryTimer = setTimeout(connect, tries++ * REJOIN_STEP_MS);
+      } else if (handle) {
+        finish('The live call dropped and could not reconnect. Start a new one to keep talking.');
+      } else if (failed) {
+        finish('The live connection failed. Check your connection and try again.');
+      } else {
+        finish(ev.code === 1000 ? undefined : `The live call closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ''}).`);
+      }
+    };
+    socket.onopen = () => socket.send(JSON.stringify(setupMessage(model, handle)));
+  }
+
+  /** Leave a connection Gemini is about to end, for a new one on the same session. */
+  function moveOn() {
+    if (ended) return;
+    if (!handle) {
+      finish('The call reached its time limit. Start a new one to keep talking.');
+      return;
+    }
+    const old = ws;
+    connect();
+    old?.close(1000);
+  }
+
+  async function onMessage(ev: MessageEvent, socket: WebSocket) {
     const text = typeof ev.data === 'string' ? ev.data : await (ev.data as Blob).text();
+    if (socket !== ws) return;
     let msg: Record<string, any>;
     try {
       msg = JSON.parse(text);
@@ -204,6 +287,16 @@ export async function startLiveCall(
     }
 
     if (msg.setupComplete) {
+      ready = true;
+      tries = 0;
+      // A resumed session: nothing to start, just catch up on the gap.
+      if (started) {
+        for (const message of backlog) send(message);
+        backlog = [];
+        return;
+      }
+      started = true;
+      limitTimer = setTimeout(() => finish('The call reached its time limit. Start a new one to keep talking.'), maxMs);
       try {
         await startMicrophone();
       } catch (err) {
@@ -226,8 +319,11 @@ export async function startLiveCall(
       return;
     }
 
+    if (msg.voiceActivity?.type === 'ACTIVITY_START') busy = true;
+
     const content = msg.serverContent;
     if (content) {
+      if (content.modelTurn) busy = true;
       if (content.interrupted) {
         // The Player spoke over it: silence now, not after the queue drains.
         stopPlayback();
@@ -239,10 +335,15 @@ export async function startLiveCall(
       }
       if (content.inputTranscription?.text) handlers.onUserText(content.inputTranscription.text);
       if (content.outputTranscription?.text) handlers.onModelText(content.outputTranscription.text);
-      if (content.turnComplete) handlers.onTurnEnd();
+      if (content.turnComplete) {
+        busy = false;
+        handlers.onTurnEnd();
+        if (leaving) moveOn();
+      }
     }
 
     if (msg.toolCall?.functionCalls) {
+      busy = true;
       const responses = [];
       for (const call of msg.toolCall.functionCalls as { id: string; name: string; args?: Record<string, unknown> }[]) {
         let response: Record<string, unknown>;
@@ -253,12 +354,19 @@ export async function startLiveCall(
         }
         responses.push({ id: call.id, name: call.name, response });
       }
-      send({ toolResponse: { functionResponses: responses } });
+      // A session resumed mid-tool came from before this call and never made it.
+      if (socket === ws) send({ toolResponse: { functionResponses: responses } });
     }
 
+    const update = msg.sessionResumptionUpdate;
+    if (update?.resumable && update.newHandle) handle = update.newHandle;
+
     if (msg.goAway) {
-      // Gemini ends long sessions; say so rather than going silent.
-      setTimeout(() => finish('The call reached its time limit. Start a new one to keep talking.'), 1500);
+      // Gemini ends connections, not the call. Move between exchanges, so
+      // nothing is cut off, or just before the line goes if none comes.
+      leaving = true;
+      leaveTimer = setTimeout(moveOn, Math.max(0, (durationMs(msg.goAway.timeLeft) ?? 0) - CUT_MARGIN_MS));
+      if (!busy) moveOn();
     }
   }
 
@@ -272,16 +380,7 @@ export async function startLiveCall(
   // Browsers start audio contexts suspended until a gesture; this runs from one.
   void playCtx.resume().catch(() => {});
 
-  ws = new WebSocket(liveUrl(token));
-  ws.onmessage = (ev) => void onMessage(ev);
-  ws.onerror = () => finish('The live connection failed. Check your connection and try again.');
-  ws.onclose = (ev) => {
-    if (ended) return;
-    finish(ev.code === 1000 ? undefined : `The live call closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ''}).`);
-  };
-  // The token carries the setup (prompt, tools, voice); the model is the
-  // only field needed here, and the token would override anything else.
-  ws.onopen = () => send({ setup: { model: `models/${model}` } });
+  connect();
 
   const loudness = (tap: AnalyserNode | null) => {
     if (!tap) return 0;
