@@ -13,6 +13,7 @@ import { AppState } from 'react-native';
 import { ACHIEVEMENTS, type AchievementDef } from '@/data/achievements';
 import { CARDS_BY_ID, earnedCards, type CardContext, type CardDef } from '@/data/cards';
 import { buildPlan, type Profile } from '@/data/profile';
+import { keepSlots, type Slots } from '@/data/dayClock';
 import { blocksToTasks, isPlannedId, plannedToQuest, type PlannedTask } from '@/data/planner';
 import type { DraftPlan, PlanBlock } from '@/data/timeline';
 import { isCeilingQuest, isComplete, windowState } from '@/data/completion';
@@ -51,6 +52,8 @@ export interface Settings {
   sound: boolean;
   haptics: boolean;
   music: boolean;
+  /** Holds the world behind the tabs still, to save battery. */
+  lowPower?: boolean;
   /** 24h "HH:MM" after which the nightly briefing offers itself. */
   briefingTime: string;
   /**
@@ -112,6 +115,12 @@ export interface ProgressState {
   plans: Record<string, StoredPlan>;
   /** Lifetime accepted plans, for the Strategist trophy. */
   plansAccepted: number;
+  /**
+   * date -> questId -> day-minutes: times given to quests on the Planner's
+   * clock, by dragging one onto it or with its Earlier and Later buttons.
+   * Only today and later are kept. Optional because older saves have none.
+   */
+  slots?: Record<string, Slots>;
   /**
    * The date a briefing was waved away for. Persisted, not held in memory:
    * "not tonight" has to survive reopening the app, or the gate just reappears.
@@ -450,6 +459,8 @@ interface ProgressApi {
    * `null`. If that flips today's completion, the XP moves with it.
    */
   setQuestOverride: (questId: string, override: QuestOverride | null) => void;
+  /** Give a quest a time on one day's clock, or take it away with `null`. */
+  setSlot: (date: string, questId: string, minutes: number | null) => void;
   addProgress: (questId: string, amount: number) => void;
   clearQuest: (questId: string) => void;
   toggleActive: (questId: string) => void;
@@ -798,6 +809,13 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             }
           }
           return applyCards(applyUnlocks(recompute(next)));
+        }),
+      setSlot: (date, questId, minutes) =>
+        setState((s) => {
+          const day = { ...(s.slots?.[date] ?? {}) };
+          if (minutes === null) delete day[questId];
+          else day[questId] = minutes;
+          return { ...s, slots: keepSlots({ ...(s.slots ?? {}), [date]: day }, s.date) };
         }),
       addProgress: (id, amount) => applyValue(id, (state.values[id] ?? 0) + amount),
       clearQuest: (id) => applyValue(id, 0),

@@ -3,6 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
+import { canDrawEmbers } from '@/components/assistant/EmberOrb';
+import { ActivityCity } from '@/components/status/ActivityCity';
 import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, categoryMeta, HIT, icon, palette, radius, space } from '@/constants/theme';
@@ -22,9 +24,26 @@ function keyOf(y: number, m: number, d: number): string {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-export function MonthCalendar() {
+/** A day's cell: a 30 px square with 3 px above and below. */
+const CELL_H = 36;
+
+/**
+ * The month as a heat-tinted calendar. With `view` set to 'city' (the Status
+ * page's switch), the same days stand up as a small 3D city instead, sharing
+ * the month, the picked day and the detail under it.
+ */
+export function MonthCalendar({ view = 'calendar' }: { view?: 'calendar' | 'city' }) {
   const { state } = useProgress();
   const log = useDayLog();
+  const [gridWidth, setGridWidth] = useState(0);
+  const [weekRowH, setWeekRowH] = useState(0);
+  // The city stays up while it lies back down, then the calendar returns.
+  const [lying, setLying] = useState(false);
+  const [lastView, setLastView] = useState(view);
+  if (view !== lastView) {
+    setLastView(view);
+    setLying(view === 'calendar');
+  }
 
   const today = todayKey();
   const [cursor, setCursor] = useState(() => {
@@ -51,6 +70,7 @@ export function MonthCalendar() {
       return { year: next.getFullYear(), month: next.getMonth() };
     });
 
+  const city = canDrawEmbers() && gridWidth > 0 && weekRowH > 0 && (view === 'city' || lying);
   const detail = selected ? log[selected] : undefined;
   const detailQuests = useMemo(() => {
     if (!detail) return [];
@@ -74,60 +94,77 @@ export function MonthCalendar() {
         <NavButton glyph="chevron" hint="Next month" onPress={() => shift(1)} />
       </View>
 
-      <View style={styles.weekRow}>
-        {WEEKDAYS.map((d, i) => (
-          <View key={i} style={styles.cell}>
-            <SystemText variant="label" style={styles.weekday}>
-              {d}
-            </SystemText>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.grid}>
-        {cells.map((key, i) => {
-          if (!key) return <View key={`pad-${i}`} style={styles.cell} />;
-
-          const rec = log[key];
-          const ratio = rec && rec.total > 0 ? rec.cleared / rec.total : 0;
-          const isToday = key === today;
-          const isSelected = key === selected;
-          const day = Number(key.slice(-2));
-
-          // Three states: perfect fills solid, partial tints by how much was
-          // cleared, untouched stays a bare outline.
-          const fill = rec?.perfect
-            ? palette.accent
-            : ratio > 0
-              ? alpha(palette.accent, 0.16 + ratio * 0.4)
-              : 'transparent';
-
-          return (
-            <Pressable
-              key={key}
-              style={styles.cell}
-              onPress={() => setSelected(key)}
-              accessibilityRole="button"
-              accessibilityLabel={`${day} ${MONTHS[cursor.month]}${rec ? `, ${rec.cleared} of ${rec.total} cleared` : ', nothing logged'}`}
-              accessibilityState={{ selected: isSelected }}>
-              <View
-                style={[
-                  styles.day,
-                  { backgroundColor: fill },
-                  isToday && { borderColor: palette.accent, borderWidth: 1 },
-                  isSelected && styles.daySelected,
-                ]}>
-                <SystemText
-                  variant="meta"
-                  color={rec?.perfect ? palette.bg : rec ? palette.text : palette.textFaint}
-                  style={styles.dayNum}>
-                  {day}
+      {city ? (
+        <ActivityCity
+          width={gridWidth}
+          height={weekRowH + Math.ceil(cells.length / 7) * CELL_H}
+          top={weekRowH}
+          cells={cells}
+          log={log}
+          today={today}
+          selected={selected}
+          onSelect={setSelected}
+          standing={view === 'city'}
+          onDown={() => setLying(false)}
+        />
+      ) : (
+        <View onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}>
+          <View style={styles.weekRow} onLayout={(e) => setWeekRowH(e.nativeEvent.layout.height)}>
+            {WEEKDAYS.map((d, i) => (
+              <View key={i} style={styles.cell}>
+                <SystemText variant="label" style={styles.weekday}>
+                  {d}
                 </SystemText>
               </View>
-            </Pressable>
-          );
-        })}
-      </View>
+            ))}
+          </View>
+
+          <View style={styles.grid}>
+            {cells.map((key, i) => {
+              if (!key) return <View key={`pad-${i}`} style={styles.cell} />;
+
+              const rec = log[key];
+              const ratio = rec && rec.total > 0 ? rec.cleared / rec.total : 0;
+              const isToday = key === today;
+              const isSelected = key === selected;
+              const day = Number(key.slice(-2));
+
+              // Three states: perfect fills solid, partial tints by how much was
+              // cleared, untouched stays a bare outline.
+              const fill = rec?.perfect
+                ? palette.accent
+                : ratio > 0
+                  ? alpha(palette.accent, 0.16 + ratio * 0.4)
+                  : 'transparent';
+
+              return (
+                <Pressable
+                  key={key}
+                  style={styles.cell}
+                  onPress={() => setSelected(key)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${day} ${MONTHS[cursor.month]}${rec ? `, ${rec.cleared} of ${rec.total} cleared` : ', nothing logged'}`}
+                  accessibilityState={{ selected: isSelected }}>
+                  <View
+                    style={[
+                      styles.day,
+                      { backgroundColor: fill },
+                      isToday && { borderColor: palette.accent, borderWidth: 1 },
+                      isSelected && styles.daySelected,
+                    ]}>
+                    <SystemText
+                      variant="meta"
+                      color={rec?.perfect ? palette.bg : rec ? palette.text : palette.textFaint}
+                      style={styles.dayNum}>
+                      {day}
+                    </SystemText>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       {/* selected-day detail */}
       <Animated.View key={selected ?? 'none'} entering={FadeIn.duration(220)} style={styles.detail}>

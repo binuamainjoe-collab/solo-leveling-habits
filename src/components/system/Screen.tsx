@@ -2,13 +2,14 @@ import type { ReactNode } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { palette, space, WIDE } from '@/constants/theme';
+import { space, WIDE } from '@/constants/theme';
 
 const MAX_CONTENT = 1120;
 
 /**
- * Shared screen frame: void background, safe-area top padding, and a centered
- * measured column so the layout doesn't sprawl on a desktop browser.
+ * Shared screen frame: safe-area top padding and a centered measured column so
+ * the layout doesn't sprawl on a desktop browser. It paints no background of
+ * its own, so the world behind the tabs shows through.
  */
 export function Screen({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
@@ -39,6 +40,6 @@ export function useContentWidth(): { width: number; wide: boolean; columns: numb
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.bg },
+  root: { flex: 1 },
   column: { flex: 1, width: '100%', maxWidth: MAX_CONTENT, alignSelf: 'center' },
 });

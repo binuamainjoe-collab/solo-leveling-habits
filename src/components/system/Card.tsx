@@ -9,7 +9,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { revealProps } from '@/components/motion/Reveal';
+import { alpha, palette, radius, space, SURFACE_ALPHA } from '@/constants/theme';
 
 interface Props {
   children: ReactNode;
@@ -22,6 +23,8 @@ interface Props {
   raised?: boolean;
   /** 0–1. How hard the scrim bites; raise it when text runs long. */
   scrim?: number;
+  /** Rise into view with the scroll. For cards that sit directly on a screen. */
+  reveal?: boolean;
   style?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
 }
@@ -32,11 +35,13 @@ function CardBase({
   tint,
   raised,
   scrim = 0.86,
+  reveal,
   style,
   contentStyle,
 }: Props) {
   return (
     <View
+      {...(reveal ? revealProps() : null)}
       style={[
         styles.root,
         raised && styles.raised,
@@ -73,14 +78,14 @@ function CardBase({
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: palette.surface,
+    backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: palette.border,
     // Clips the artwork to the rounded corners.
     overflow: 'hidden',
   },
-  raised: { backgroundColor: palette.surfaceRaised, borderRadius: radius.md },
+  raised: { backgroundColor: alpha(palette.surfaceRaised, SURFACE_ALPHA), borderRadius: radius.md },
   content: { padding: space.lg },
 });
 

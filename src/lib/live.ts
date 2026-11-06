@@ -9,6 +9,7 @@ import {
   OUT_RATE,
   pcm16ToFloat,
 } from '@/data/live';
+import { voiceLevel } from '@/lib/beerus';
 
 /**
  * A live voice call with The System, in the browser.
@@ -46,6 +47,8 @@ export interface LiveHandlers {
 
 export interface LiveCall {
   end: () => void;
+  /** How loud the call is right now, 0 to 1: whoever is talking, you or The System. */
+  level: () => number;
 }
 
 export function liveSupported(): boolean {
@@ -82,6 +85,11 @@ export async function startLiveCall(
   let micCtx: AudioContext | null = null;
   let playCtx: AudioContext | null = null;
   let node: AudioWorkletNode | null = null;
+  // Taps on both directions of the call, so Beerus can move with whoever is talking.
+  let micTap: AnalyserNode | null = null;
+  let outTap: AnalyserNode | null = null;
+  let outBus: GainNode | null = null;
+  const heard = new Float32Array(512);
   const playing = new Set<AudioBufferSourceNode>();
   let playAt = 0;
   let pending = new Float32Array(0);
@@ -120,7 +128,7 @@ export async function startLiveCall(
     buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
     const source = playCtx.createBufferSource();
     source.buffer = buffer;
-    source.connect(playCtx.destination);
+    source.connect(outBus ?? playCtx.destination);
     // Back to back, so the chunks join into one unbroken voice.
     playAt = Math.max(playAt, playCtx.currentTime + 0.02);
     source.start(playAt);
@@ -181,6 +189,9 @@ export async function startLiveCall(
       if (!ended) sendAudio(ev.data, ctx.sampleRate);
     };
     source.connect(node);
+    micTap = ctx.createAnalyser();
+    micTap.fftSize = 512;
+    source.connect(micTap);
   }
 
   async function onMessage(ev: MessageEvent) {
@@ -253,6 +264,11 @@ export async function startLiveCall(
 
   handlers.onState('connecting');
   playCtx = new AudioContext({ sampleRate: OUT_RATE });
+  outBus = playCtx.createGain();
+  outTap = playCtx.createAnalyser();
+  outTap.fftSize = 512;
+  outBus.connect(outTap);
+  outTap.connect(playCtx.destination);
   // Browsers start audio contexts suspended until a gesture; this runs from one.
   void playCtx.resume().catch(() => {});
 
@@ -267,5 +283,14 @@ export async function startLiveCall(
   // only field needed here, and the token would override anything else.
   ws.onopen = () => send({ setup: { model: `models/${model}` } });
 
-  return { end: () => finish() };
+  const loudness = (tap: AnalyserNode | null) => {
+    if (!tap) return 0;
+    tap.getFloatTimeDomainData(heard);
+    return voiceLevel(heard);
+  };
+
+  return {
+    end: () => finish(),
+    level: () => (ended ? 0 : Math.max(loudness(micTap), loudness(outTap))),
+  };
 }

@@ -5,6 +5,7 @@ import { CardsPanel } from '@/components/collection/CardsPanel';
 import { TrophiesPanel } from '@/components/collection/TrophiesPanel';
 import { Screen } from '@/components/system/Screen';
 import { Segmented } from '@/components/system/Segmented';
+import { WordReveal } from '@/components/motion/WordReveal';
 import { SystemText } from '@/components/system/SystemText';
 import { palette, space } from '@/constants/theme';
 import { CARDS } from '@/data/cards';
@@ -26,9 +27,9 @@ export default function CollectionScreen() {
 
   return (
     <Screen>
-      <SystemText variant="heading" style={styles.heading}>
+      <WordReveal screen="collection" variant="heading" style={styles.heading}>
         COLLECTION
-      </SystemText>
+      </WordReveal>
 
       <View style={styles.switch}>
         <Segmented<View_>

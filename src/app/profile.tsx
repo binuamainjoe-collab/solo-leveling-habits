@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, TextInput, View } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { MotionScroll } from '@/components/motion/MotionScroll';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
@@ -126,7 +126,7 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <SystemText variant="hero" style={styles.title}>
           Profile
         </SystemText>
@@ -339,7 +339,7 @@ export default function ProfileScreen() {
             </Card>
           </View>
         ))}
-      </ScrollView>
+      </MotionScroll>
     </Screen>
   );
 }

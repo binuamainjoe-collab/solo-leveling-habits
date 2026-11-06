@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Ring } from '@/components/charts/Ring';
+import { Rolling } from '@/components/motion/Rolling';
 import { Pressable } from '@/components/system/Pressable';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, palette, radius, space } from '@/constants/theme';
@@ -14,8 +15,8 @@ export const GROUP_META: Record<Group, { label: string; color: string; hint: str
 };
 
 /**
- * Today split three ways, one ring each. Tap one to open that group's
- * quests as cards in a sheet.
+ * Today split three ways, one ring each, cut into its card with depth. Tap
+ * one to open that group's quests as cards in a sheet.
  */
 export function BalanceRings({
   tallies,
@@ -46,10 +47,8 @@ export function BalanceRings({
             accessibilityState={{ selected: on, disabled: t.total === 0 }}
             accessibilityLabel={`${meta.label}: ${t.done} of ${t.total} done. Open ${meta.label.toLowerCase()} quests`}>
             <View style={[styles.card, on && { borderColor: meta.color, backgroundColor: alpha(meta.color, 0.08) }, t.total === 0 && styles.empty]}>
-              <Ring size={56} stroke={7} ratio={ratio} color={meta.color}>
-                <SystemText variant="meta" color={palette.text} style={styles.pct}>
-                  {Math.round(ratio * 100)}%
-                </SystemText>
+              <Ring size={56} stroke={7} ratio={ratio} color={meta.color} depth>
+                <Rolling text={`${Math.round(ratio * 100)}%`} lineHeight={18} variant="meta" color={palette.text} style={styles.pct} />
               </Ring>
               <View style={styles.text}>
                 <SystemText variant="title" numberOfLines={1}>

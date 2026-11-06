@@ -48,7 +48,9 @@ function SystemTextBase({ variant = 'body', color, glow, style, ...rest }: Props
   // Outfit ships one file per weight. Asking a custom face for a weight
   // makes the browser fake a bold, so the weight picks the file instead.
   const face = DISPLAY.has(variant) && !own.fontFamily ? { fontFamily: faceFor(flat.fontWeight), fontWeight: 'normal' as const } : null;
-  return <Text maxFontSizeMultiplier={1.6} {...rest} style={[flat, face, resolveType(styles[variant], own)]} />;
+  // Section headings brighten as they arrive, like the rest of the page.
+  const arrive = variant === 'heading' ? { dataSet: { reveal: 'head' } } : null;
+  return <Text maxFontSizeMultiplier={1.6} {...arrive} {...rest} style={[flat, face, resolveType(styles[variant], own)]} />;
 }
 
 const DISPLAY = new Set<TextVariant>(['hero', 'heading', 'title', 'numeral']);

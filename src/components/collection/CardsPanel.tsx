@@ -1,9 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { FlatList, RectButton } from 'react-native-gesture-handler';
+import { FlatList, Pressable, RectButton } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { CollectibleCard } from '@/components/card/CollectibleCard';
+import { CardCarousel } from '@/components/collection/CardCarousel';
+import { openCard, useOpenCardId } from '@/components/collection/CardViewer';
+import { usePressTilt } from '@/components/collection/tilt';
+import { MotionScroll } from '@/components/motion/MotionScroll';
 import { Card } from '@/components/system/Card';
+import { RangeSwitch } from '@/components/system/Panel';
 import { useContentWidth } from '@/components/system/Screen';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, palette, radius, space } from '@/constants/theme';
@@ -35,6 +41,7 @@ export function CardsPanel() {
   const { state } = useProgress();
   const { width, columns } = useContentWidth();
   const [filter, setFilter] = useState<Filter>('all');
+  const [browse, setBrowse] = useState<'carousel' | 'grid'>('carousel');
 
   const owned = useMemo(() => new Set(state.cards), [state.cards]);
 
@@ -66,7 +73,7 @@ export function CardsPanel() {
   const renderItem = useCallback(
     ({ item }: { item: CardDef }) => (
       <View style={{ width: cardWidth, marginBottom: gap }}>
-        <CollectibleCard card={item} owned={owned.has(item.id)} />
+        <GridCard card={item} owned={owned.has(item.id)} />
       </View>
     ),
     [owned, cardWidth, gap],
@@ -74,8 +81,8 @@ export function CardsPanel() {
 
   const mythics = CARDS.filter((c) => c.rarity === 'mythic' && owned.has(c.id)).length;
 
-  return (
-    <View style={styles.panel}>
+  const top = (
+    <>
       <View style={styles.head}>
         <Card contentStyle={styles.summary}>
           <View style={styles.summaryItem}>
@@ -121,8 +128,32 @@ export function CardsPanel() {
             </SystemText>
           </RectButton>
         ))}
+        <View style={styles.browse}>
+          <RangeSwitch
+            options={[
+              { value: 'carousel', label: 'Carousel' },
+              { value: 'grid', label: 'Grid' },
+            ]}
+            value={browse}
+            onChange={setBrowse}
+          />
+        </View>
       </View>
+    </>
+  );
 
+  if (browse === 'carousel') {
+    return (
+      <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
+        {top}
+        <CardCarousel cards={data} owned={owned} width={width} />
+      </MotionScroll>
+    );
+  }
+
+  return (
+    <View style={styles.panel}>
+      {top}
       <FlatList
         key={`cols-${gridColumns}`}
         data={data}
@@ -144,8 +175,37 @@ export function CardsPanel() {
   );
 }
 
+/**
+ * A card in the grid tips toward a finger pressed on it, its foil and art
+ * shifting with it, and lies flat again when let go. Nothing moves at rest.
+ * Tapped, it grows out of its place to fill the screen.
+ */
+function GridCard({ card, owned }: { card: CardDef; owned: boolean }) {
+  const tilt = usePressTilt();
+  const box = useRef<View | null>(null);
+  const out = useOpenCardId() === card.id;
+  const style = useAnimatedStyle(() => ({
+    transform: [{ perspective: 800 }, { rotateY: `${tilt.x.get() * 9}deg` }, { rotateX: `${-tilt.y.get() * 9}deg` }],
+  }));
+  return (
+    <Animated.View {...tilt.handlers} style={[style, out && styles.out]}>
+      <Pressable
+        onPress={() => openCard(card, owned, box.current)}
+        accessibilityRole="button"
+        accessibilityLabel={owned ? `Open ${card.name}` : 'Open undiscovered card'}>
+        <View ref={box} collapsable={false}>
+          <CollectibleCard card={card} owned={owned} tilt={tilt} />
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   panel: { flex: 1 },
+  browse: { marginLeft: 'auto' },
+  // The card is out on the screen; its slot stands empty until it comes back.
+  out: { opacity: 0 },
   head: { marginBottom: space.lg },
   summary: { flexDirection: 'row', alignItems: 'center', padding: space.lg },
   summaryItem: { flex: 1, gap: 2, minWidth: 0 },

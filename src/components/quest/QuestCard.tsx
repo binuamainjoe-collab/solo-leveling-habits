@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Pressable } from '@/components/system/Pressable';
 import Animated, {
   Easing,
@@ -9,16 +10,23 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
+import { openRing, releaseRing, ringHover, type RingItem } from '@/components/motion/RingMenu';
+import { SwipeRow } from '@/components/motion/SwipeRow';
 import { Card } from '@/components/system/Card';
 import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, categoryMeta, HIT, icon, palette, radius, space } from '@/constants/theme';
-import { feedback, playSound } from '@/lib/feedback';
+import { openAssistant } from '@/lib/assistantBus';
+import { feedback, haptic, playSound } from '@/lib/feedback';
+import { ringPick } from '@/lib/moves';
+import { rememberChange } from '@/lib/undo';
 import { artFor } from '@/data/cardArt';
 import type { QuestDef } from '@/data/quests';
 import { windowState } from '@/data/completion';
 import { isPlannedId } from '@/data/planner';
+import { isBoss, openGate } from '@/lib/gateBus';
 import { PLANNED_XP_MULTIPLIER } from '@/store/progress';
 
 interface Props {
@@ -76,20 +84,28 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
 
   /* ------------------------------------------------------------- handlers */
   const step = stepFor(quest);
+  // Every change goes through here, so a two-finger swipe can take it back.
+  const change = useCallback(
+    (next: number) => {
+      rememberChange({ questId: quest.id, title: quest.title, before: value, after: next });
+      onChange(next);
+    },
+    [quest.id, quest.title, value, onChange],
+  );
   // The tick fires on press; the completion chime is raised separately by the
   // effect above, so finishing a quest is heard as a distinct, better sound.
   const toggle = useCallback(() => {
     playSound('tap');
-    onChange(done ? 0 : quest.target);
-  }, [done, quest.target, onChange]);
+    change(done ? 0 : quest.target);
+  }, [done, quest.target, change]);
   const increase = useCallback(() => {
     playSound('tap');
-    onChange(value + step);
-  }, [value, step, onChange]);
+    change(value + step);
+  }, [value, step, change]);
   const decrease = useCallback(() => {
     playSound('tap');
-    onChange(Math.max(0, value - step));
-  }, [value, step, onChange]);
+    change(Math.max(0, value - step));
+  }, [value, step, change]);
 
   const isToggle = quest.kind === 'binary' || quest.kind === 'window';
 
@@ -107,9 +123,13 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
             {cat.glyph} {cat.short}
           </SystemText>
         </View>
-        <SystemText variant="label" color={done ? palette.positive : palette.accent} style={styles.xp}>
-          +{reward}
-        </SystemText>
+        <View style={styles.topEnd}>
+          {/* Gates are for boss work done over time, and a one-tap card is already one big button. */}
+          {isBoss(quest.rank) && !isToggle && !done && !shut ? <GateButton questId={quest.id} title={quest.title} /> : null}
+          <SystemText variant="label" color={done ? palette.positive : palette.accent} style={styles.xp}>
+            +{reward}
+          </SystemText>
+        </View>
       </View>
 
       <View style={styles.spacer} />
@@ -133,7 +153,99 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
     </>
   );
 
+  // Swipe right to do it, left to take it back. Both only mirror what the
+  // buttons on the card already do, so nothing here is gesture-only. Doing
+  // it leaves a trail of fire behind the card.
+  const stepLabel = `+${fmt(step)}`;
+  const forward = shut || (isToggle && done)
+    ? undefined
+    : {
+        icon: isToggle ? ('check' as const) : ('plus' as const),
+        label: isToggle ? 'Done' : stepLabel,
+        color: palette.bg,
+        ink: palette.text,
+        trail: true,
+        onFire: isToggle ? toggle : increase,
+      };
+  // Hold the card and its actions open in a ring round the finger. Each is
+  // also a button or a swipe on the card, so the ring is only a shortcut.
+  const ring: RingItem[] = [];
+  if (!shut) {
+    ring.push(
+      isToggle
+        ? { key: 'do', label: done ? 'Not done' : 'Done', icon: done ? 'undo' : 'check', run: toggle }
+        : { key: 'do', label: stepLabel, icon: 'plus', run: increase },
+    );
+  }
+  ring.push({
+    key: 'ask',
+    label: 'Ask Beerus',
+    icon: 'compose',
+    run: () => openAssistant('chat', `Help me get "${quest.title}" done today. ${quest.objective}`),
+  });
+  if (!isToggle && value > 0) ring.push({ key: 'back', label: `−${fmt(step)}`, icon: 'minus', run: decrease });
+  if (isBoss(quest.rank) && !isToggle && !done && !shut) {
+    ring.push({ key: 'gate', label: 'Gate', icon: 'gate', run: (at) => openGate(quest.id, at.x, at.y) });
+  }
+  const held = useSharedValue(0);
+  const host = useRef<View | null>(null);
+  const openMenu = (x: number, y: number) => openRing(x, y, quest.title, ring);
+  const count = ring.length;
+  const hold = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(420)
+        .maxPointers(1)
+        .onStart((e) => {
+          held.set(1);
+          scheduleOnRN(openMenu, e.absoluteX, e.absoluteY);
+        })
+        .onUpdate((e) => {
+          const i = ringPick(e.translationX, e.translationY, count);
+          if (i !== ringHover.get()) {
+            ringHover.set(i);
+            if (i >= 0) scheduleOnRN(haptic, 'tick');
+          }
+        })
+        .onEnd(() => {
+          scheduleOnRN(releaseRing, ringHover.get());
+        })
+        .onFinalize(() => {
+          // Held a moment longer, so the press the finger lifted from is not also a tap.
+          held.set(withDelay(300, withTiming(0, { duration: 0 })));
+        }),
+    // openMenu reads the ring as it is now; it only changes with the card's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [count, held],
+  );
+  // Once the ring is open, the finger is choosing, so the page must not scroll under it.
+  useEffect(() => {
+    const el = host.current as unknown as HTMLElement | null;
+    if (Platform.OS !== 'web' || !el) return;
+    const stop = (e: TouchEvent) => {
+      if (held.get() && e.cancelable) e.preventDefault();
+    };
+    el.addEventListener('touchmove', stop, { passive: false });
+    return () => el.removeEventListener('touchmove', stop);
+  }, [held]);
+  const tapped = (fn: () => void) => () => {
+    if (!held.get()) fn();
+  };
+
+  const back = value > 0
+    ? {
+        icon: 'undo' as const,
+        label: 'Undo',
+        color: palette.surfaceRaised,
+        ink: palette.text,
+        onFire: isToggle ? toggle : decrease,
+      }
+    : undefined;
+
   return (
+    <SwipeRow right={forward} left={back} corner={radius.lg}>
+    <GestureDetector gesture={hold} touchAction="pan-y">
+    <View ref={host} collapsable={false}>
     <Card
       art={artFor(quest.id, quest.category)}
       scrim={0.78}
@@ -149,7 +261,7 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
         // keeps its controls separate so no pressable ever nests inside
         // another — on web that renders an invalid <button> in <button>.
         <PressSurface
-          onPress={toggle}
+          onPress={tapped(toggle)}
           disabled={shut}
           label={`${quest.title}. ${quest.objective}`}
           selected={done}>
@@ -181,8 +293,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
         <View>
           {face}
           <View style={styles.footer}>
-            <StepButton glyph="minus" hint="Decrease" onPress={decrease} disabled={value <= 0} />
-            <StepButton glyph="plus" hint="Increase" onPress={increase} accent />
+            <StepButton glyph="minus" hint="Decrease" onPress={tapped(decrease)} disabled={value <= 0} />
+            <StepButton glyph="plus" hint="Increase" onPress={tapped(increase)} accent />
           </View>
         </View>
       )}
@@ -210,6 +322,9 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
         </SystemText>
       </Animated.View>
     </Card>
+    </View>
+    </GestureDetector>
+    </SwipeRow>
   );
 }
 
@@ -250,6 +365,31 @@ function PressSurface({
         }}>
         {children}
       </Animated.View>
+    </Pressable>
+  );
+}
+
+/**
+ * The way into a boss quest's Gate. The portal opens from right here, so it
+ * reads as stepping into this quest and nothing else.
+ */
+function GateButton({ questId, title }: { questId: string; title: string }) {
+  const at = useRef<View | null>(null);
+  return (
+    <Pressable
+      onPress={() => {
+        const box = (at.current as unknown as HTMLElement | null)?.getBoundingClientRect?.();
+        openGate(questId, box ? box.left + box.width / 2 : 0, box ? box.top + box.height / 2 : 0);
+      }}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={`Enter the Gate for ${title}`}>
+      <View ref={at} collapsable={false} style={styles.gate}>
+        <Icon name="gate" size={icon.small} color={palette.accentSoft} />
+        <SystemText variant="label" color={palette.accentSoft} style={styles.gateText}>
+          Gate
+        </SystemText>
+      </View>
     </Pressable>
   );
 }
@@ -311,6 +451,19 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 11 },
   xp: { fontSize: 13 },
+  topEnd: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  gate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderWidth: 1,
+    borderColor: alpha(palette.accentSoft, 0.45),
+    backgroundColor: alpha(palette.bg, 0.55),
+    borderRadius: radius.pill,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  gateText: { fontSize: 11 },
   // Pushes the title to the lower half so the artwork reads above it.
   spacer: { height: 44 },
   title: { fontSize: 17, lineHeight: 22 },

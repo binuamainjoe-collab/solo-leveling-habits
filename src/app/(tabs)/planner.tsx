@@ -1,21 +1,25 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { Pressable } from 'react-native-gesture-handler';
+import { MotionScroll } from '@/components/motion/MotionScroll';
+import Animated, { FadeIn, ReduceMotion, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { DayClock, PART_META, type ClockIcon } from '@/components/charts/DayClock';
 import { Ring } from '@/components/charts/Ring';
+import { DayWeekZoom } from '@/components/planner/DayWeekZoom';
 import { Timeline, formatMinutes, type LiveTimeline } from '@/components/planner/Timeline';
+import { WeekView, weekAnchor, type WeekDay } from '@/components/planner/WeekView';
 import { QuestIcon } from '@/components/quest/QuestIcon';
 import { Card } from '@/components/system/Card';
 import { Pressable as SafePressable } from '@/components/system/Pressable';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { Segmented } from '@/components/system/Segmented';
+import { WordReveal } from '@/components/motion/WordReveal';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, categoryMeta, HIT, palette, radius, space } from '@/constants/theme';
 import { blockIsDone } from '@/data/assistant';
-import { overlap, partAt, partsOf, placeQuests, spanOf, type Part } from '@/data/dayClock';
+import { firstFreeTime, nudge, overlap, partAt, partsOf, placeQuests, spanOf, weekOf, type Part, type Slots } from '@/data/dayClock';
 import {
   isResumable,
   plannerConfigured,
@@ -37,13 +41,18 @@ import {
   type PlanBlock,
 } from '@/data/timeline';
 import { feedback, playSound } from '@/lib/feedback';
+import { SPRING } from '@/lib/motion';
 import { loadSession } from '@/lib/plannerSession';
-import { isCeilingQuest, isComplete, useActiveQuests, useProgress, useQuestLookup } from '@/store/progress';
+import { isCeilingQuest, isComplete, useActiveQuests, useDayLog, useProgress, useQuestLookup } from '@/store/progress';
 
 type Day = 'today' | 'tomorrow';
 
 /** One empty list, so a day with no plan does not hand the clock a new array every render. */
 const NO_BLOCKS: PlanBlock[] = [];
+const NO_SLOTS: Slots = {};
+
+/** The zoom between day and week settles like a tab landing, or at once with reduced motion. */
+const ZOOM_SPRING = { ...SPRING.page, reduceMotion: ReduceMotion.System };
 
 /**
  * The day as a clock — today's to work through, tomorrow's to look ahead.
@@ -58,7 +67,8 @@ const NO_BLOCKS: PlanBlock[] = [];
  * minute, or a task checked here would not be checked there.
  */
 export default function PlannerScreen() {
-  const { state, setProgress, addProgress } = useProgress();
+  const { state, setProgress, addProgress, setSlot } = useProgress();
+  const log = useDayLog();
   const lookup = useQuestLookup();
   const board = useActiveQuests();
   const { width, wide } = useContentWidth();
@@ -88,6 +98,9 @@ export default function PlannerScreen() {
   const [focusPart, setFocusPart] = useState<Part | null>(null);
   /** The quest picked on the clock, shown below it with its buttons. */
   const [picked, setPicked] = useState<string | null>(null);
+  /** The week, flat, in the clock's place: pinch the clock, or the Week button. 0 is the day, 1 the week. */
+  const [week, setWeek] = useState(false);
+  const zoom = useSharedValue(0);
 
   const [session, setSession] = useState<PlannerSession | null>(null);
   // On focus, not mount: this tab stays mounted under the chat, and coming
@@ -113,7 +126,8 @@ export default function PlannerScreen() {
   // The board's quests on the clock. Planned tasks are already the plan's
   // own blocks, so they are not drawn twice. (The React Compiler memoises these.)
   const quests = board.filter((q) => q.category !== 'planned');
-  const { placed, floating } = placeQuests(quests, blocks, wake, sleep);
+  const slots = state.slots?.[date] ?? NO_SLOTS;
+  const { placed, floating } = placeQuests(quests, blocks, wake, sleep, slots);
   const progressOf = (q: QuestDef) => {
     const v = isToday ? (state.values[q.id] ?? 0) : 0;
     const done = isToday && isComplete(q, v);
@@ -182,10 +196,50 @@ export default function PlannerScreen() {
     const p = placed.find((x) => x.quest.id === pickedQuest.id);
     if (!p) return 'Any time today';
     const part = PART_META[partAt(p.minutes)].label.toLowerCase();
+    if (p.source === 'slot') return `At ${fromMinutes(p.minutes)}, your time, ${part}`;
     if (p.source === 'plan') return `At ${fromMinutes(p.minutes)} in your plan, ${part}`;
     if (p.source === 'window') return `Around ${fromMinutes(p.minutes)}, ${part}`;
     return `Usually in the ${part}`;
   })();
+
+  const pickedPlace = pickedQuest ? (placed.find((x) => x.quest.id === pickedQuest.id) ?? null) : null;
+  const nowMinutes = isToday ? dayMinutes(minute, wake) : null;
+  const schedule = (id: string, minutes: number | null) => setSlot(date, id, minutes);
+
+  const showWeek = useCallback((on: boolean) => {
+    setWeek(on);
+    if (on) setPicked(null);
+  }, []);
+  function openWeek() {
+    zoom.set(withSpring(1, ZOOM_SPRING));
+    showWeek(true);
+  }
+  function openDay(next: Day) {
+    setDay(next);
+    setPicked(null);
+    setFocusPart(null);
+    setWeek(false);
+    zoom.set(withSpring(0, ZOOM_SPRING));
+  }
+
+  const weekDays: WeekDay[] = weekOf(date).map((d) => {
+    const rec = log[d];
+    const future = d > today;
+    const timeline = state.plans[d]?.timeline;
+    return {
+      date: d,
+      weekday: weekdayOf(d).slice(0, 3),
+      sub: d === today ? 'Today' : d === tomorrow ? 'Tomorrow' : '',
+      cleared: future ? 0 : (rec?.cleared ?? 0),
+      total: future ? 0 : (rec?.total ?? 0),
+      perfect: !future && Boolean(rec?.perfect),
+      future,
+      plan: timeline ? { wake: timeline.wake, sleep: timeline.sleep, blocks: timeline.blocks } : null,
+      now: d === today ? dayMinutes(minute, timeline?.wake ?? wake) : null,
+      opens: d === today || d === tomorrow,
+    };
+  });
+  const weekIndex = Math.max(0, weekDays.findIndex((d) => d.date === date));
 
   function openChat() {
     playSound('tap');
@@ -196,13 +250,13 @@ export default function PlannerScreen() {
 
   return (
     <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <SystemText variant="label" color={palette.textMuted}>
           Planner
         </SystemText>
-        <SystemText variant="hero" style={styles.hero}>
+        <WordReveal screen="planner" variant="hero" style={styles.hero}>
           {weekdayOf(date)}
-        </SystemText>
+        </WordReveal>
         <SystemText variant="meta" style={styles.dateLine}>
           {prettyDate(date).replace(`${weekdayOf(date)} `, '')}
           {plan
@@ -211,17 +265,14 @@ export default function PlannerScreen() {
         </SystemText>
 
         <View style={styles.switch}>
-          <Segmented<Day>
+          <Segmented<Day | 'week'>
             segments={[
               { key: 'today', label: 'Today' },
               { key: 'tomorrow', label: 'Tomorrow' },
+              { key: 'week', label: 'Week' },
             ]}
-            value={day}
-            onChange={(d) => {
-              setDay(d);
-              setPicked(null);
-              setFocusPart(null);
-            }}
+            value={week ? 'week' : day}
+            onChange={(d) => (d === 'week' ? openWeek() : openDay(d))}
           />
         </View>
 
@@ -238,18 +289,37 @@ export default function PlannerScreen() {
 
         <Animated.View key={date} entering={FadeIn.duration(220)} style={[styles.top, wide && styles.topWide]}>
           <View style={styles.clockWrap}>
-            <DayClock
+            <DayWeekZoom
               size={clockSize}
-              wake={wake}
-              sleep={sleep}
-              blocks={blocks}
-              now={isToday ? minute : null}
-              icons={icons}
-              selected={picked}
-              onSelect={(id) => setPicked((p) => (p === id ? null : id))}
-              focusPart={focusPart}
-              centreTop={centreTop}
-              centreSub={centreSub}
+              zoom={zoom}
+              week={week}
+              anchor={weekAnchor(weekIndex, clockSize)}
+              onWeek={showWeek}
+              day={
+                <DayClock
+                  size={clockSize}
+                  wake={wake}
+                  sleep={sleep}
+                  blocks={blocks}
+                  now={isToday ? minute : null}
+                  icons={icons}
+                  selected={picked}
+                  onSelect={(id) => setPicked((p) => (p === id ? null : id))}
+                  onSchedule={schedule}
+                  focusPart={focusPart}
+                  centreTop={centreTop}
+                  centreSub={centreSub}
+                  paused={week}
+                />
+              }
+              weekView={
+                <WeekView
+                  days={weekDays}
+                  selected={date}
+                  size={clockSize}
+                  onOpen={(d) => openDay(d === today ? 'today' : 'tomorrow')}
+                />
+              }
             />
           </View>
 
@@ -306,6 +376,12 @@ export default function PlannerScreen() {
                 done={progressOf(pickedQuest).done}
                 where={pickedWhere}
                 live={isToday}
+                time={pickedPlace?.minutes ?? null}
+                mine={pickedPlace?.source === 'slot'}
+                onTime={(m) => {
+                  playSound('tap');
+                  schedule(pickedQuest.id, m === undefined ? firstFreeTime(nowMinutes, span) : m === null ? null : nudge(m.from, m.by, span));
+                }}
                 onAdd={(by) => {
                   if (by > 0 && isComplete(pickedQuest, (state.values[pickedQuest.id] ?? 0) + by)) feedback('complete', 'success');
                   else playSound('tap');
@@ -320,9 +396,11 @@ export default function PlannerScreen() {
             ) : (
               <View style={styles.hint}>
                 <SystemText variant="meta">
-                  {quests.length
-                    ? 'Tap a quest’s icon on the clock to see it and log it. Inside the ring: the ones with no set time.'
-                    : 'No quests on the board. Add some from the Archive.'}
+                  {week
+                    ? 'Tap today or tomorrow to open it on the clock, or spread two fingers on the week.'
+                    : quests.length
+                      ? 'Tap a quest’s icon on the clock to see it and log it. Inside the ring: the ones with no set time. Hold one to carry it onto the ring and give it a time. Pinch the clock to see the week.'
+                      : 'No quests on the board. Add some from the Archive.'}
                 </SystemText>
               </View>
             )}
@@ -380,7 +458,7 @@ export default function PlannerScreen() {
             />
           </Animated.View>
         ) : null}
-      </ScrollView>
+      </MotionScroll>
     </Screen>
   );
 }
@@ -395,6 +473,9 @@ function PickedQuest({
   done,
   where,
   live,
+  time,
+  mine,
+  onTime,
   onAdd,
   onSet,
 }: {
@@ -404,6 +485,16 @@ function PickedQuest({
   where: string;
   /** Only today's quests can be logged. */
   live: boolean;
+  /** Its time on the clock in day-minutes, or null when it has none. */
+  time: number | null;
+  /** The time is one you gave it, so it can be taken away again. */
+  mine: boolean;
+  /**
+   * Move it: `undefined` gives it a first time, `{ from, by }` moves it, and
+   * `null` takes your time away. The buttons do what carrying it onto the
+   * clock does, for anyone who can't or would rather not drag.
+   */
+  onTime: (move: { from: number; by: number } | null | undefined) => void;
   onAdd: (by: number) => void;
   onSet: (value: number) => void;
 }) {
@@ -441,6 +532,17 @@ function PickedQuest({
       ) : live ? (
         <SystemText variant="meta">Log this one on its card on the Today screen.</SystemText>
       ) : null}
+      <View style={styles.pickedButtons}>
+        {time === null ? (
+          <ActionPill label="Give it a time" onPress={() => onTime(undefined)} />
+        ) : (
+          <>
+            <ActionPill label="Earlier" onPress={() => onTime({ from: time, by: -15 })} />
+            <ActionPill label="Later" onPress={() => onTime({ from: time, by: 15 })} />
+            {mine ? <ActionPill label="No set time" onPress={() => onTime(null)} /> : null}
+          </>
+        )}
+      </View>
     </Animated.View>
   );
 }

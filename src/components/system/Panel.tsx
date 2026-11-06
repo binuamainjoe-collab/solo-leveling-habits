@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { revealProps } from '@/components/motion/Reveal';
 import { Icon, type IconName } from '@/components/system/Icon';
 import { Pressable } from '@/components/system/Pressable';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, icon, palette, radius, space, SURFACE_ALPHA } from '@/constants/theme';
 import { playSound } from '@/lib/feedback';
 
 /**
@@ -28,7 +29,7 @@ export function Panel({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={[styles.panel, style]}>
+    <View {...revealProps()} style={[styles.panel, style]}>
       <View style={styles.head}>
         <View style={styles.badge}>
           <Icon name={iconName} size={icon.body} color={palette.accentSoft} />
@@ -109,7 +110,7 @@ export function PanelLink({ label, onPress }: { label: string; onPress: () => vo
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: palette.surface,
+    backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: palette.border,

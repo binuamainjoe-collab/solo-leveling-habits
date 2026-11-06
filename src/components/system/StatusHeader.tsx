@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Ring } from '@/components/charts/Ring';
+import { Rolling } from '@/components/motion/Rolling';
 import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, gradient, icon, palette, radius, rankMeta, space } from '@/constants/theme';
@@ -19,11 +20,11 @@ export function StatusHeader() {
 
   return (
     <View style={styles.card}>
-      <Ring size={132} stroke={12} ratio={ratio} colors={[gradient.ember[0], gradient.ember[2]]}>
+      <Ring size={132} stroke={12} ratio={ratio} colors={[gradient.ember[0], gradient.ember[2]]} depth>
         <SystemText variant="meta">Level</SystemText>
-        <SystemText variant="numeral" style={styles.level} accessibilityLabel={`Level ${level}`}>
-          {level}
-        </SystemText>
+        <View accessibilityLabel={`Level ${level}`}>
+          <Rolling text={String(level)} lineHeight={44} style={styles.level} />
+        </View>
       </Ring>
 
       <View style={styles.side}>
@@ -33,11 +34,17 @@ export function StatusHeader() {
               {rank}-rank
             </SystemText>
           </View>
-          <SystemText variant="meta">{state.xp.toLocaleString('en-US')} XP in all</SystemText>
+          <View style={styles.inline}>
+            <Rolling text={state.xp.toLocaleString('en-US')} lineHeight={18} variant="meta" />
+            <SystemText variant="meta">{' XP in all'}</SystemText>
+          </View>
         </View>
-        <SystemText variant="body" color={palette.text}>
-          {(need - into).toLocaleString('en-US')} XP to level {level + 1}
-        </SystemText>
+        <View style={styles.inline}>
+          <Rolling text={(need - into).toLocaleString('en-US')} lineHeight={22} variant="body" color={palette.text} />
+          <SystemText variant="body" color={palette.text}>
+            {` XP to level ${level + 1}`}
+          </SystemText>
+        </View>
 
         <View style={styles.stats}>
           <Stat label="Streak" value={`${state.streak} ${state.streak === 1 ? 'day' : 'days'}`} flame tint={palette.accentSoft} />
@@ -77,6 +84,7 @@ const styles = StyleSheet.create({
     marginBottom: space.lg,
   },
   level: { fontSize: 40, lineHeight: 44 },
+  inline: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   side: { flex: 1, minWidth: 200, gap: space.sm },
   rankRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },
   rank: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: 4 },

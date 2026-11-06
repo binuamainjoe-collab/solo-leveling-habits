@@ -57,6 +57,9 @@ export const display = {
   bold: 'Outfit_700Bold',
 } as const;
 
+/** Cards let this much of themselves stand between you and the world behind them. */
+export const SURFACE_ALPHA = 0.84;
+
 /** rgba() from a hex token — used for scrims, tints and glows. */
 export function alpha(hex: string, a: number): string {
   const h = hex.replace('#', '');

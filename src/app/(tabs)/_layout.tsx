@@ -1,9 +1,10 @@
-import { Tabs } from 'expo-router';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
-import Animated from 'react-native-reanimated';
+import Animated, { interpolate, useAnimatedStyle, Extrapolation } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SwipeTabs, useTabsMotion } from '@/components/motion/SwipeTabs';
 import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, icon, palette, space, WIDE } from '@/constants/theme';
@@ -29,17 +30,20 @@ const TABS = [
   { name: 'hunter', label: 'Status', icon: 'status' },
 ] as const satisfies readonly ({ name: string; label: string } & ({ icon: IconName } | { mark: string }))[];
 
+/** How far the bar slides down when it tucks: the labels leave, the icons stay. */
+const TUCK = 18;
+
+const PAGES = TABS.map((t) => t.name);
+
 export default function TabsLayout() {
   return (
-    <Tabs
-      screenOptions={{ headerShown: false, sceneStyle: styles.scene }}
-      tabBar={(props) => <SystemTabBar {...props} />}>
+    <SwipeTabs pages={PAGES} tabBar={(props) => <SystemTabBar {...props} />}>
       {TABS.map((t) => (
-        <Tabs.Screen key={t.name} name={t.name} options={{ title: t.label }} />
+        <SwipeTabs.Screen key={t.name} name={t.name} options={{ title: t.label }} />
       ))}
-      {/* Still a route, just not a tab — reached from the Quests screen. */}
-      <Tabs.Screen name="archive" options={{ title: 'ARCHIVE' }} />
-    </Tabs>
+      {/* Still a route, just not a tab: it opens over the pages. */}
+      <SwipeTabs.Screen name="archive" options={{ title: 'ARCHIVE' }} />
+    </SwipeTabs>
   );
 }
 
@@ -61,30 +65,49 @@ interface TabBarProps {
 }
 
 /**
- * An Apple-style tab bar: an outlined symbol over a short label, the
- * selected tab in the accent, the rest in grey, a hairline above. The
- * System's touch stays: the accent underline still slides in over the
- * selected tab and the tab fades up, so every tap still animates
- * (principle 10). It stays docked at the bottom on every size; past the
- * WIDE breakpoint the tabs stop stretching and centre instead.
+ * The tab bar floats over the pages and moves with them. Its underline and
+ * colours are worked out from the strip's live position, so they follow your
+ * finger through a swipe rather than jumping when it lands. While you read
+ * downward it tucks away to just its icons; scrolling up brings it back.
  */
 function SystemTabBar({ state, navigation }: TabBarProps) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wide = width >= WIDE;
+  const motion = useTabsMotion();
+  const [tabWidth, setTabWidth] = useState(0);
+
+  const barStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(motion?.chrome.get() ?? 0, [0, 1], [0, TUCK], Extrapolation.CLAMP) }],
+  }));
+  const underlineStyle = useAnimatedStyle(() => {
+    const progress = motion?.progress.get() ?? 0;
+    return {
+      opacity: interpolate(motion?.chrome.get() ?? 0, [0, 1], [1, 0], Extrapolation.CLAMP),
+      // Stretches as it travels and snaps back to size when it lands.
+      transform: [{ translateX: progress * tabWidth }, { scaleX: 1 + Math.abs(progress - Math.round(progress)) * 0.8 }],
+    };
+  });
 
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.xs) }]}>
+    <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.xs) }, barStyle]}>
       <View style={[styles.barInner, wide && styles.barInnerWide]}>
+        {tabWidth > 0 ? (
+          <Animated.View pointerEvents="none" style={[styles.underline, { width: tabWidth }, underlineStyle]}>
+            <View style={styles.indicator} />
+          </Animated.View>
+        ) : null}
         {state.routes.map((route, index) => {
           const meta = TABS.find((t) => t.name === route.name);
           if (!meta) return null;
           const focused = state.index === index;
-          const tint = focused ? palette.accent : palette.textMuted;
 
           return (
             <Pressable
               key={route.key}
+              onLayout={(e: LayoutChangeEvent) => {
+                if (index === 0) setTabWidth(e.nativeEvent.layout.width);
+              }}
               style={[styles.tab, wide && styles.tabWide]}
               accessibilityRole="button"
               accessibilityState={{ selected: focused }}
@@ -99,47 +122,61 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
                 if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
               }}>
               <View style={styles.tabInner}>
-                {/* active underline slides in via a CSS transition on scaleX */}
-                <Animated.View
-                  style={[
-                    styles.indicator,
-                    {
-                      transform: [{ scaleX: focused ? 1 : 0 }],
-                      transformOrigin: 'center center',
-                      transitionProperty: 'transform',
-                      transitionDuration: 220,
-                      transitionTimingFunction: 'ease-out',
-                    },
-                  ]}
-                />
-                <Animated.View
-                  style={[
-                    styles.tabContent,
-                    { opacity: focused ? 1 : 0.7, transitionProperty: 'opacity', transitionDuration: 200 },
-                  ]}>
-                  {'icon' in meta ? (
-                    <Icon name={meta.icon} size={icon.tab} color={tint} />
-                  ) : (
-                    <SystemText variant="title" color={tint} style={styles.mark}>
-                      {meta.mark}
-                    </SystemText>
-                  )}
-                  <SystemText variant="meta" color={tint} numberOfLines={1} style={styles.label}>
-                    {meta.label}
-                  </SystemText>
-                </Animated.View>
+                <TabFace meta={meta} slot={TABS.indexOf(meta)} />
               </View>
             </Pressable>
           );
         })}
       </View>
+    </Animated.View>
+  );
+}
+
+/**
+ * One tab's symbol and label: a grey copy with an ember copy on top, faded by
+ * how close the strip is to this page, so colour slides between tabs.
+ */
+function TabFace({ meta, slot }: { meta: (typeof TABS)[number]; slot: number }) {
+  const motion = useTabsMotion();
+
+  const lit = useAnimatedStyle(() => ({
+    opacity: interpolate(Math.abs((motion?.progress.get() ?? 0) - slot), [0, 1], [1, 0], Extrapolation.CLAMP),
+  }));
+  const labelStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(motion?.chrome.get() ?? 0, [0, 0.6], [1, 0], Extrapolation.CLAMP),
+  }));
+
+  const face = (tint: string) => (
+    <>
+      {'icon' in meta ? (
+        <Icon name={meta.icon} size={icon.tab} color={tint} />
+      ) : (
+        <SystemText variant="title" color={tint} style={styles.mark}>
+          {meta.mark}
+        </SystemText>
+      )}
+      <Animated.View style={labelStyle}>
+        <SystemText variant="meta" color={tint} numberOfLines={1} style={styles.label}>
+          {meta.label}
+        </SystemText>
+      </Animated.View>
+    </>
+  );
+
+  return (
+    <View style={styles.tabContent}>
+      <View style={styles.tabLayer}>{face(palette.textMuted)}</View>
+      <Animated.View style={[styles.tabLit, lit]}>{face(palette.accent)}</Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scene: { backgroundColor: palette.bg },
   bar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: alpha(palette.surface, 0.94),
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: palette.borderStrong,
@@ -150,9 +187,12 @@ const styles = StyleSheet.create({
   tabWide: { flex: 0, minWidth: 120 },
   // 49pt is the iOS tab bar height; the symbol and label sit centred in it.
   tabInner: { height: 49, alignItems: 'center', justifyContent: 'center' },
-  tabContent: { alignItems: 'center', gap: 2 },
+  tabContent: { alignItems: 'center' },
+  tabLayer: { alignItems: 'center', gap: 2 },
+  tabLit: { ...StyleSheet.absoluteFill, alignItems: 'center', gap: 2 },
+  underline: { position: 'absolute', top: 0, left: 0, height: 2, alignItems: 'center' },
   // ◆ set to the same 25pt box as the symbols beside it.
   mark: { fontSize: 22, lineHeight: 25, height: 25, textAlign: 'center' },
-  indicator: { position: 'absolute', top: 0, height: 2, width: '40%', borderRadius: 1, backgroundColor: palette.accent },
+  indicator: { height: 2, width: '40%', borderRadius: 1, backgroundColor: palette.accent },
   label: { fontSize: 11, fontWeight: '500', textAlign: 'center' },
 });

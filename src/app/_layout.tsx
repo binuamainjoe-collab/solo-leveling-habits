@@ -12,20 +12,31 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Pressable } from 'react-native-gesture-handler';
+import { useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { UnlockOverlay } from '@/components/achievement/UnlockOverlay';
 import { SystemAssistant } from '@/components/assistant/SystemAssistant';
 import { CardRevealOverlay } from '@/components/card/CardRevealOverlay';
+import { BigMoments } from '@/components/moments/BigMoments';
+import { FocusGate } from '@/components/moments/FocusGate';
+import { settleLaunch, useCeremonyPlaying, useFocusOpen } from '@/components/moments/stage';
+import { useAirborne } from '@/components/motion/flight';
+import { MovesHost } from '@/components/motion/MovesHost';
+import { Opening } from '@/components/motion/Opening';
 import { BreathingExercise } from '@/components/system/BreathingGate';
+import { SystemText } from '@/components/system/SystemText';
+import { storage } from '@/store/storage';
 import { fromOnboarding } from '@/data/lifeProfile';
 import { saveProfileFields } from '@/lib/profile';
 import { rememberAccount, setSignInSkipped, useSignInSkipped } from '@/lib/auth';
 import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
 import { initMusic, resumeMusic, setMusicEnabled, suspendMusic } from '@/lib/music';
-import { palette } from '@/constants/theme';
+import { alpha, palette, radius, space } from '@/constants/theme';
+import { ACHIEVEMENTS } from '@/data/achievements';
+import { CARDS } from '@/data/cards';
 import { planReminders } from '@/data/reminders';
 import { snapshotFor } from '@/data/snapshot';
 import { addDays } from '@/data/timeline';
@@ -78,7 +89,10 @@ export default function RootLayout() {
           <SnapshotBridge />
           <ReminderBridge />
           <SystemAssistant />
+          <MovesHost />
+          <FocusGate />
           <BreathingGate />
+          <BigMoments />
           <GlobalReveals />
         </ProgressProvider>
       </SafeAreaProvider>
@@ -325,36 +339,123 @@ function ReminderBridge() {
   return null;
 }
 
+const OPENED_KEY = 'system.openedOn';
+
 /**
- * A breathing exercise between opening the app and seeing the board.
+ * A breathing exercise between opening the app and seeing the board, then,
+ * on the first open of the day, half a second of the board opening like a gate.
  *
- * Held in component state rather than persisted, so it runs once per app
- * launch — remount the app, breathe again. Skipped entirely during onboarding:
- * a student who hasn't set anything up yet should not be made to sit through a
- * minute of box breathing before they can begin.
+ * The breathing is held in component state rather than persisted, so it runs
+ * once per app launch — remount the app, breathe again. Skipped entirely
+ * during onboarding: a student who hasn't set anything up yet should not be
+ * made to sit through a minute of box breathing before they can begin.
+ *
+ * Whether today has opened yet is read at launch and decided the moment the
+ * breathing ends, so the opening can never turn up late over a board you are
+ * already using.
  */
 function BreathingGate() {
-  const { ready, onboarded } = useProgress();
+  const { ready, onboarded, state } = useProgress();
   const needsSignIn = useNeedsSignIn();
+  const reduced = useReducedMotion();
   const [done, setDone] = useState(false);
-  const finish = useCallback(() => setDone(true), []);
+  const [openedOn, setOpenedOn] = useState<string | null | undefined>(undefined);
+  const [opening, setOpening] = useState(false);
+  const today = state.date;
 
-  if (!ready || !onboarded || needsSignIn !== false || done) return null;
-  return <BreathingExercise onFinish={finish} />;
+  useEffect(() => {
+    let alive = true;
+    storage.get(OPENED_KEY).then(
+      (v) => alive && setOpenedOn(v),
+      () => alive && setOpenedOn(null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const finish = useCallback(() => {
+    setDone(true);
+    if (Platform.OS === 'web' && !reduced && openedOn !== undefined && openedOn !== today) setOpening(true);
+  }, [openedOn, reduced, today]);
+
+  const opened = useCallback(() => {
+    setOpening(false);
+    setOpenedOn(today);
+    void storage.set(OPENED_KEY, today).catch(() => {});
+  }, [today]);
+
+  // The board is on screen and the launch is over: big moments may play now.
+  const shown = ready && onboarded && needsSignIn === false;
+  useEffect(() => {
+    if (shown && done && !opening) settleLaunch();
+  }, [shown, done, opening]);
+
+  if (!ready || !onboarded || needsSignIn !== false) return null;
+  if (!done) return <BreathingExercise onFinish={finish} />;
+  return opening ? <Opening late onDone={opened} /> : null;
 }
 
 /**
  * Plays whatever is at the head of the reward queues. Cards go first: a rank-up
  * grants both a card and an achievement, and the card is the bigger moment.
+ * They wait their turn: for a cleared quest to land in the ring, for a level,
+ * rank or perfect day to finish its ceremony, and for a boss Gate to close.
  */
 function GlobalReveals() {
   const { pendingCard, dismissCard, pendingUnlock, dismissUnlock } = useProgress();
+  const ceremony = useCeremonyPlaying();
+  const airborne = useAirborne('ring');
+  const focus = useFocusOpen();
+  const [preview, setPreview] = useState<number | null>(null);
+  const [previews, setPreviews] = useState(0);
+  if (ceremony || airborne || focus) return null;
   if (pendingCard) return <CardRevealOverlay card={pendingCard} onDismiss={dismissCard} />;
   if (pendingUnlock) return <UnlockOverlay achievement={pendingUnlock} onDismiss={dismissUnlock} />;
-  return null;
+  if (!PREVIEWS) return null;
+  // Test copies only: a fresh profile has no rare card or gold trophy to show.
+  const shown = preview === null ? null : PREVIEWS[preview % PREVIEWS.length];
+  if (shown?.card) return <CardRevealOverlay card={shown.card} onDismiss={() => setPreview(null)} />;
+  if (shown?.trophy) return <UnlockOverlay achievement={shown.trophy} onDismiss={() => setPreview(null)} />;
+  const next = PREVIEWS[previews % PREVIEWS.length];
+  return (
+    <Pressable
+      onPress={() => {
+        setPreview(previews);
+        setPreviews(previews + 1);
+      }}
+      style={styles.preview}
+      accessibilityRole="button"
+      accessibilityLabel="Preview a reveal">
+      <SystemText variant="meta" color={palette.text}>
+        Preview: {next.label}
+      </SystemText>
+    </Pressable>
+  );
 }
 
+/** Test copies show a pill that plays these, in turn. */
+const PREVIEWS =
+  process.env.EXPO_PUBLIC_BEERUS_DEMO === '1'
+    ? [
+        { label: 'mythic card', card: CARDS.find((c) => c.rarity === 'mythic') },
+        { label: 'gold trophy', trophy: ACHIEVEMENTS.find((x) => x.tier === 'gold') },
+        { label: 'epic card', card: CARDS.find((c) => c.rarity === 'epic') },
+      ]
+    : null;
+
 const styles = StyleSheet.create({
+  preview: {
+    position: 'absolute',
+    left: space.lg,
+    bottom: 204,
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    backgroundColor: alpha(palette.surface, 0.9),
+  },
   root: { flex: 1, backgroundColor: palette.bg },
   boot: { flex: 1, backgroundColor: palette.bg },
 });

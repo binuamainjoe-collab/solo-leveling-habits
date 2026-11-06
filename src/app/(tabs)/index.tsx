@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
+import { Pressable } from 'react-native-gesture-handler';
+import { MotionScroll } from '@/components/motion/MotionScroll';
+import { revealProps } from '@/components/motion/Reveal';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -23,9 +25,10 @@ import { Card } from '@/components/system/Card';
 import { Icon } from '@/components/system/Icon';
 import { Panel, PanelLink, RangeSwitch } from '@/components/system/Panel';
 import { Screen, useContentWidth } from '@/components/system/Screen';
+import { RankSeal } from '@/components/moments/RankSeal';
 import { PlanNudge } from '@/components/planner/PlanNudge';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, HIT, icon, palette, radius, space, type CategoryId } from '@/constants/theme';
+import { alpha, categoryMeta, HIT, icon, palette, radius, space, type CategoryId, type Rank } from '@/constants/theme';
 import { plannerConfigured } from '@/data/planner';
 import {
   balance,
@@ -40,8 +43,9 @@ import {
 } from '@/data/insights';
 import type { QuestDef } from '@/data/quests';
 import { clockNow, dayMinutes, defaultPlanDate, prettyDate, type PlanBlock } from '@/data/timeline';
+import { fly } from '@/components/motion/flight';
 import { openAssistant } from '@/lib/assistantBus';
-import { playSound } from '@/lib/feedback';
+import { feedback, playSound } from '@/lib/feedback';
 import {
   isCeilingQuest,
   isComplete,
@@ -69,7 +73,7 @@ export default function QuestBoardScreen() {
   const { state, setProgress, addProgress } = useProgress();
   const active = useActiveQuests();
   const log = useDayLog();
-  const { done: doneCount, total, level, into, need } = useDayStats();
+  const { done: doneCount, total, level, into, need, rank } = useDayStats();
   const { width, columns, wide } = useContentWidth();
   const now = useMinute();
 
@@ -125,12 +129,16 @@ export default function QuestBoardScreen() {
     return { kind: 'clear' };
   }, [plan, clock, allTodo, now, state.values, state.plans, state.date]);
 
+  const nextCard = useRef<View>(null);
   const runStep = () => {
     if (step.kind === 'block') router.push('/planner');
     else if (step.kind === 'plan') router.push({ pathname: '/planner-chat', params: { date: defaultPlanDate(now) } });
     else if (step.kind === 'quest') {
       const q = step.quest;
-      if (q.kind === 'binary' || q.kind === 'window') setProgress(q.id, q.target);
+      const binary = q.kind === 'binary' || q.kind === 'window';
+      const next = binary ? q.target : step.value + (q.step ?? 1);
+      if (isComplete(q, next)) clearInto(nextCard.current, doneCount, total);
+      if (binary) setProgress(q.id, q.target);
       else addProgress(q.id, q.step ?? 1);
     }
   };
@@ -163,22 +171,17 @@ export default function QuestBoardScreen() {
   };
 
   const renderCard = (quest: QuestDef, delayIndex: number) => (
-    <Animated.View
+    <BoardCard
       key={quest.id}
-      // Duration-based, not springify(): spring layout animations are
-      // unsupported on web.
-      entering={FadeInDown.duration(300).delay(Math.min(420, delayIndex * 35))}
-      exiting={FadeOut.duration(180)}
-      // Closes the gap a cleared quest leaves, rather than snapping shut.
-      layout={LinearTransition.duration(240)}
-      style={{ width: cardWidth }}>
-      <QuestCard
-        quest={quest}
-        value={state.values[quest.id] ?? 0}
-        ceiling={isCeilingQuest(quest)}
-        onChange={(next) => setProgress(quest.id, next)}
-      />
-    </Animated.View>
+      quest={quest}
+      value={state.values[quest.id] ?? 0}
+      width={cardWidth}
+      order={delayIndex}
+      // Only a card leaving To do flies: on Done it stays where it is.
+      flies={page === 'todo'}
+      day={{ done: doneCount, total }}
+      onChange={(next) => setProgress(quest.id, next)}
+    />
   );
 
   // Slides in from the side the page lives on: Done sits to the right of To do.
@@ -188,7 +191,13 @@ export default function QuestBoardScreen() {
 
   return (
     <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <MotionScroll
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+        onPull={() => {
+          playSound('tap');
+          openAssistant('chat');
+        }}>
         <View style={[styles.row, wide && styles.rowWide]}>
           <View style={wide ? styles.colWide : null}>
             <TodayHero
@@ -206,6 +215,7 @@ export default function QuestBoardScreen() {
               step={step}
               onStep={runStep}
               onAsk={() => openAssistant('chat')}
+              nextRef={nextCard}
               compact={!wide}
             />
           </View>
@@ -327,6 +337,7 @@ export default function QuestBoardScreen() {
                 tint={palette.positive}
                 title="BOARD CLEARED"
                 body="Every quest on today's board is done. Check the Done page to see what you finished."
+                seal={rank}
               />
             ) : (
               <EmptyPage
@@ -422,9 +433,65 @@ export default function QuestBoardScreen() {
             <Icon name="chevron" size={icon.small} color={palette.textMuted} />
           </View>
         </Pressable>
-      </ScrollView>
+      </MotionScroll>
       <GroupSheet group={group} quests={active} onChange={setGroup} onClose={() => setGroup(null)} />
     </Screen>
+  );
+}
+
+/**
+ * A quest just cleared from `from`: it flies up into the day's ring, to the
+ * chime. `done` and `total` are today's count before it, for the stand-in
+ * ring that catches it when the real one is scrolled away.
+ */
+function clearInto(from: View | null, done: number, total: number) {
+  const node = from as unknown as HTMLElement | null;
+  const share = (n: number) => (total > 0 ? n / total : 0);
+  fly(node?.querySelector?.('[data-swipe="face"]') ?? node, 'ring', { before: share(done), after: share(done + 1) });
+  // A card leaving To do unmounts at once, so it can't sound its own chime.
+  feedback('complete', 'success');
+}
+
+function BoardCard({
+  quest,
+  value,
+  width,
+  order,
+  flies,
+  day,
+  onChange,
+}: {
+  quest: QuestDef;
+  value: number;
+  width: number;
+  order: number;
+  flies: boolean;
+  /** Today's count so far, for the ring the card flies into. */
+  day: { done: number; total: number };
+  onChange: (next: number) => void;
+}) {
+  const slot = useRef<View>(null);
+  return (
+    <Animated.View
+      // Duration-based, not springify(): spring layout animations are
+      // unsupported on web.
+      entering={FadeInDown.duration(300).delay(Math.min(420, order * 35))}
+      exiting={FadeOut.duration(180)}
+      // Closes the gap a cleared quest leaves, rather than snapping shut.
+      layout={LinearTransition.duration(240)}
+      style={{ width }}>
+      <View ref={slot} collapsable={false} {...revealProps(order % 2 ? '1' : '')}>
+        <QuestCard
+          quest={quest}
+          value={value}
+          ceiling={isCeilingQuest(quest)}
+          onChange={(next) => {
+            if (flies && !isComplete(quest, value) && isComplete(quest, next)) clearInto(slot.current, day.done, day.total);
+            onChange(next);
+          }}
+        />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -611,10 +678,15 @@ function EmptyAction({
   );
 }
 
-function EmptyPage({ tint, title, body }: { tint: string; title: string; body: string }) {
+/**
+ * An empty page says what it is and what to do. A cleared board also shows
+ * your rank's seal, forged in as the last quest goes: the board is won.
+ */
+function EmptyPage({ tint, title, body, seal }: { tint: string; title: string; body: string; seal?: Rank }) {
   return (
     <Animated.View entering={FadeIn.duration(300)}>
       <Card tint={tint}>
+        {seal ? <RankSeal rank={seal} size={92} tag={{ dataSet: { cer: 'forge' } }} /> : null}
         <SystemText variant="hero" color={tint} style={styles.emptyTitle}>
           {title}
         </SystemText>

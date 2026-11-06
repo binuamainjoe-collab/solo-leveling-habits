@@ -1,8 +1,8 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
+import { Medal, medalGlow } from '@/components/achievement/Medal';
 import { Card } from '@/components/system/Card';
 import { Icon } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
@@ -16,23 +16,6 @@ interface Props {
   goal: number;
 }
 
-/* Keyframes at module scope so they aren't rebuilt on every render. */
-
-/** Diagonal highlight that sweeps across an unlocked card, forever. */
-const SHIMMER = {
-  '0%': { transform: [{ translateX: -280 }, { rotate: '16deg' }], opacity: 0 },
-  '15%': { transform: [{ translateX: -150 }, { rotate: '16deg' }], opacity: 1 },
-  '85%': { transform: [{ translateX: 220 }, { rotate: '16deg' }], opacity: 1 },
-  '100%': { transform: [{ translateX: 340 }, { rotate: '16deg' }], opacity: 0 },
-};
-
-/** Slow breathing glow behind the tier glyph. */
-const PULSE = {
-  '0%': { opacity: 0.28, transform: [{ scale: 1 }] },
-  '50%': { opacity: 0.72, transform: [{ scale: 1.14 }] },
-  '100%': { opacity: 0.28, transform: [{ scale: 1 }] },
-};
-
 function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props) {
   const tier = tierMeta[a.tier];
   const ratio = goal > 0 ? Math.min(1, current / goal) : 0;
@@ -41,9 +24,6 @@ function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props)
   const title = hidden ? '???' : a.title;
   const requirement = hidden ? 'Hidden objective' : a.requirement;
 
-  // Stagger the sweep so a grid of cards doesn't shimmer in lockstep.
-  const delay = useMemo<`${number}ms`>(() => `${(hashCode(a.id) % 24) * 190}ms`, [a.id]);
-
   return (
     <Card
       // An unlocked card takes its tier's tint across the whole frame, the way
@@ -51,56 +31,18 @@ function AchievementCardBase({ achievement: a, unlocked, current, goal }: Props)
       tint={unlocked ? tier.color : undefined}
       style={[styles.card, !unlocked && styles.locked]}
       contentStyle={styles.inner}>
-      {unlocked ? (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Animated.View
-            style={[
-              styles.shimmer,
-              {
-                animationName: SHIMMER,
-                animationDuration: '2800ms',
-                animationIterationCount: 'infinite',
-                animationTimingFunction: 'ease-in-out',
-                animationDelay: delay,
-              },
-            ]}>
-            <LinearGradient
-              colors={['transparent', alpha(tier.glowA, 0.3), 'transparent']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFill}
-            />
-          </Animated.View>
-        </View>
-      ) : null}
-
       <View style={styles.row}>
+        {/* The trophy as a medal in its metal, the glyph struck on its face.
+            Flick it to spin it; it stands still otherwise. Locked ones are
+            iron with a lock, secrets carry a question mark. */}
         <View style={styles.medallion}>
           {unlocked ? (
-            <Animated.View
+            <View
               pointerEvents="none"
-              style={[
-                styles.halo,
-                {
-                  backgroundColor: alpha(tier.glowA, 0.45),
-                  animationName: PULSE,
-                  animationDuration: '2600ms',
-                  animationIterationCount: 'infinite',
-                  animationTimingFunction: 'ease-in-out',
-                },
-              ]}
+              style={[styles.halo, { backgroundColor: alpha(medalGlow(a.tier, true), 0.16), boxShadow: `0px 0px 22px ${alpha(medalGlow(a.tier, true), 0.4)}` } as object]}
             />
           ) : null}
-          {/* The trophy's own glyph is its art and stays; the lock is a symbol. */}
-          {!hidden && !unlocked ? (
-            <View style={styles.glyphLocked}>
-              <Icon name="lock" size={icon.tab} color={palette.textMuted} />
-            </View>
-          ) : (
-            <SystemText variant="heading" style={[styles.glyph, !unlocked && styles.glyphLocked]}>
-              {hidden ? '?' : a.glyph}
-            </SystemText>
-          )}
+          <Medal size={52} tier={a.tier} glyph={a.glyph} xp={a.xp} unlocked={unlocked} hidden={hidden} />
         </View>
 
         <View style={styles.body}>
@@ -179,30 +121,13 @@ function compact(n: number): string {
   return String(n);
 }
 
-/** Tiny deterministic hash, used only to stagger animation delays. */
-function hashCode(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i);
-  return Math.abs(h);
-}
-
 const styles = StyleSheet.create({
   card: { marginBottom: space.md },
   locked: { opacity: 0.75 },
   inner: { padding: space.lg },
-  shimmer: { position: 'absolute', top: -60, bottom: -60, width: 100 },
   row: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },
   medallion: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
-  halo: {
-    position: 'absolute',
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    // A real blur is costly per-card in a long list; a soft disc reads the
-    // same at this size.
-  },
-  glyph: { fontSize: 28, lineHeight: 34 },
-  glyphLocked: { opacity: 0.45 },
+  halo: { position: 'absolute', width: 44, height: 44, borderRadius: 22 },
   body: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
   title: { flex: 1, minWidth: 0 },

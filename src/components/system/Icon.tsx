@@ -59,6 +59,8 @@ const NAMES = {
   judge: { ios: 'checkmark.seal', android: 'gavel', web: 'gavel' },
   overseer: { ios: 'eye', android: 'visibility', web: 'visibility' },
   link: { ios: 'link', android: 'link', web: 'link' },
+  // A ring within a ring: the way into a boss quest's Gate.
+  gate: { ios: 'circle.circle', android: 'adjust', web: 'adjust' },
 } satisfies Record<string, Names>;
 
 export type IconName = keyof typeof NAMES;

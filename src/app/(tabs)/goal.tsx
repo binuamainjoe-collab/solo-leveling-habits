@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, TextInput, View } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { MotionScroll } from '@/components/motion/MotionScroll';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Ring } from '@/components/charts/Ring';
@@ -9,6 +9,7 @@ import { Pressable } from '@/components/system/Pressable';
 import { ReportOverlay } from '@/components/system/ReportOverlay';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { Sheet } from '@/components/system/Sheet';
+import { WordReveal } from '@/components/motion/WordReveal';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, gradient, HIT, icon, palette, radius, rankMeta, space } from '@/constants/theme';
 import {
@@ -358,11 +359,11 @@ export default function GoalScreen() {
 
   return (
     <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <View style={styles.headRow}>
-          <SystemText variant="hero" style={styles.flex}>
+          <WordReveal screen="goal" variant="hero" style={styles.flex}>
             Goals
-          </SystemText>
+          </WordReveal>
           {goal && goals.length < MAX_ACTIVE_GOALS ? (
             <RoundButton name="plus" label="Add a goal" onPress={() => setSheet({ kind: 'add' })} />
           ) : null}
@@ -519,7 +520,7 @@ export default function GoalScreen() {
             </View>
           </>
         )}
-      </ScrollView>
+      </MotionScroll>
 
       {/* Adding a goal. */}
       <Sheet visible={sheet?.kind === 'add'} onClose={close} height={0.62} header={<SystemText variant="heading">New goal</SystemText>}>

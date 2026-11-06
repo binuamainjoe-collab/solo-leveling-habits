@@ -1,6 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
-import { Platform } from 'react-native';
 
 /**
  * Sound and haptics for the app, behind one switch.
@@ -91,6 +90,11 @@ export function setSoundEnabled(on: boolean): void {
   soundOn = on;
 }
 
+/** Whether the Sound effects switch is on, for sounds made outside this module. */
+export function soundEnabled(): boolean {
+  return soundOn;
+}
+
 export function setHapticsEnabled(on: boolean): void {
   hapticsOn = on;
 }
@@ -127,19 +131,24 @@ export function playSound(name: SoundName): void {
   }
 }
 
-type HapticKind = 'light' | 'medium' | 'success';
+type HapticKind = 'tick' | 'light' | 'medium' | 'success';
 
+/**
+ * A short buzz. On the web this reaches Android phones through the browser's
+ * vibration API; iPhones ignore it there. A gesture's look never depends on it.
+ */
 export function haptic(kind: HapticKind): void {
-  // Web has no haptics API worth using; calling through is a no-op at best.
-  if (!hapticsOn || Platform.OS === 'web') return;
+  if (!hapticsOn) return;
   const run =
     kind === 'success'
       ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-      : Haptics.impactAsync(
-          kind === 'light'
-            ? Haptics.ImpactFeedbackStyle.Light
-            : Haptics.ImpactFeedbackStyle.Medium,
-        );
+      : kind === 'tick'
+        ? Haptics.selectionAsync()
+        : Haptics.impactAsync(
+            kind === 'light'
+              ? Haptics.ImpactFeedbackStyle.Light
+              : Haptics.ImpactFeedbackStyle.Medium,
+          );
   run.catch(() => {});
 }
 

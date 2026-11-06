@@ -1,11 +1,18 @@
+import { useEffect, useRef, type RefObject } from 'react';
 import { StyleSheet, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { Ring } from '@/components/charts/Ring';
+import { RingFlame } from '@/components/dashboard/RingFlame';
+import { XpTube } from '@/components/dashboard/XpTube';
+import { onLanding, setFlightTarget, useHeldWhileFlying } from '@/components/motion/flight';
+import { Rolling } from '@/components/motion/Rolling';
 import { Icon } from '@/components/system/Icon';
 import { Pressable } from '@/components/system/Pressable';
+import { WordReveal } from '@/components/motion/WordReveal';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, gradient, HIT, icon, palette, radius, space } from '@/constants/theme';
+import { alpha, gradient, HIT, icon, palette, radius, space, SURFACE_ALPHA } from '@/constants/theme';
 import { inMinutes, type DayPoint, type NextBlock } from '@/data/insights';
 import type { QuestDef } from '@/data/quests';
 import { playSound } from '@/lib/feedback';
@@ -18,20 +25,25 @@ export type NextStep =
   | { kind: 'clear' };
 
 const DAY = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const CATCH_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 
 /**
  * The top of the day. Three questions, answered without reading a list:
  * how far through today am I (the ring), what do I do now (one step, with
  * the button that does it), and am I keeping it going (the week of flames).
+ *
+ * The ring is the forge of the day. Cleared quests fly into it, and it only
+ * fills when one lands, so the cause is plain to see; the corner glows hotter
+ * as the day fills, and the streak burns in its bowl.
  */
 export function TodayHero({
   greeting,
-  done,
+  done: doneNow,
   total,
-  level,
-  into,
-  need,
-  streak,
+  level: levelNow,
+  into: intoNow,
+  need: needNow,
+  streak: streakNow,
   week,
   today,
   selected,
@@ -39,6 +51,7 @@ export function TodayHero({
   step,
   onStep,
   onAsk,
+  nextRef,
   compact,
 }: {
   greeting: string;
@@ -55,19 +68,51 @@ export function TodayHero({
   step: NextStep;
   onStep: () => void;
   onAsk: () => void;
+  /** The next-step card, so a quest cleared from it can fly into the ring. */
+  nextRef?: RefObject<View | null>;
   compact: boolean;
 }) {
+  // Everything a cleared quest changes waits for it to reach the ring.
+  const done = useHeldWhileFlying(doneNow, 'ring');
+  const level = useHeldWhileFlying(levelNow, 'ring');
+  const into = useHeldWhileFlying(intoNow, 'ring');
+  const need = useHeldWhileFlying(needNow, 'ring');
+  const streak = useHeldWhileFlying(streakNow, 'ring');
+
   const ratio = total > 0 ? done / total : 0;
   const ringSize = compact ? 108 : 148;
+  const ringStroke = compact ? 11 : 14;
+
+  const target = useRef<View>(null);
+  const caught = useSharedValue(0);
+  useEffect(() => {
+    setFlightTarget('ring', target.current as unknown as HTMLElement | null);
+    const stop = onLanding((t) => {
+      if (t !== 'ring') return;
+      caught.set(
+        withSequence(
+          withTiming(1, { duration: 90, easing: CATCH_OUT }),
+          withTiming(0, { duration: 460, easing: CATCH_OUT }),
+        ),
+      );
+    });
+    return () => {
+      stop();
+      setFlightTarget('ring', null);
+    };
+  }, [caught]);
+  const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + 0.07 * caught.get() }] }));
+  const flashStyle = useAnimatedStyle(() => ({ opacity: caught.get() }));
 
   return (
     <View style={styles.hero}>
-      {/* The ember glow behind the ring: the warmth comes from the corner the eye goes to. */}
+      {/* The ember glow behind the ring: the warmth comes from the corner the
+          eye goes to, and it burns hotter as the day fills. */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" pointerEvents="none">
         <Defs>
           <RadialGradient id="heroGlow" cx="88%" cy="18%" rx="62%" ry="78%">
-            <Stop offset="0" stopColor={gradient.ember[1]} stopOpacity={0.42} />
-            <Stop offset="0.45" stopColor={gradient.ember[2]} stopOpacity={0.16} />
+            <Stop offset="0" stopColor={gradient.ember[1]} stopOpacity={0.3 + 0.28 * ratio} />
+            <Stop offset="0.45" stopColor={gradient.ember[2]} stopOpacity={0.12 + 0.1 * ratio} />
             <Stop offset="1" stopColor={palette.surface} stopOpacity={0} />
           </RadialGradient>
         </Defs>
@@ -76,9 +121,9 @@ export function TodayHero({
 
       <View style={styles.top}>
         <View style={styles.headline}>
-          <SystemText variant="hero" style={[styles.greeting, compact && styles.greetingCompact]}>
+          <WordReveal screen="today" variant="hero" style={[styles.greeting, compact && styles.greetingCompact]}>
             {greeting}
-          </SystemText>
+          </WordReveal>
           <SystemText variant="body" color={palette.text} style={styles.status}>
             {total === 0
               ? 'Nothing on the board yet.'
@@ -87,24 +132,41 @@ export function TodayHero({
                 : `${done} of ${total} quests cleared today.`}
           </SystemText>
           <View style={styles.level} accessibilityLabel={`Level ${level}, ${need - into} XP to level ${level + 1}`}>
-            <SystemText variant="title" color={palette.accentSoft} style={styles.levelText}>
-              Level {level}
-            </SystemText>
-            <View style={styles.xpTrack}>
-              <View style={[styles.xpFill, { width: `${Math.max(3, (into / Math.max(1, need)) * 100)}%` }]} />
+            <View style={styles.inline}>
+              <SystemText variant="title" color={palette.accentSoft} style={styles.levelText}>
+                {'Level '}
+              </SystemText>
+              <Rolling text={String(level)} lineHeight={20} variant="title" color={palette.accentSoft} style={styles.levelText} />
             </View>
-            <SystemText variant="meta">{(need - into).toLocaleString('en-US')} XP to go</SystemText>
+            <XpTube ratio={into / Math.max(1, need)} level={level} />
+            <View style={styles.inline}>
+              <Rolling text={(need - into).toLocaleString('en-US')} lineHeight={18} variant="meta" />
+              <SystemText variant="meta">{' XP to go'}</SystemText>
+            </View>
           </View>
         </View>
-        <Ring size={ringSize} stroke={compact ? 11 : 14} ratio={ratio} colors={[gradient.ember[0], gradient.ember[2]]}>
-          <SystemText variant="numeral" style={compact ? styles.ringNumCompact : styles.ringNum}>
-            {Math.round(ratio * 100)}%
-          </SystemText>
-          <SystemText variant="meta">today</SystemText>
-        </Ring>
+        <Animated.View style={ringStyle}>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.flash, { borderRadius: ringSize / 2 }, flashStyle]}
+          />
+          <View ref={target} collapsable={false}>
+            <Ring size={ringSize} stroke={ringStroke} ratio={ratio} colors={[gradient.ember[0], gradient.ember[2]]} depth>
+              <RingFlame ring={ringSize} stroke={ringStroke} streak={streak} />
+              <Rolling
+                text={`${Math.round(ratio * 100)}%`}
+                lineHeight={compact ? 32 : 38}
+                style={[compact ? styles.ringNumCompact : styles.ringNum, styles.overFlame]}
+              />
+              <SystemText variant="meta" style={styles.overFlame}>
+                today
+              </SystemText>
+            </Ring>
+          </View>
+        </Animated.View>
       </View>
 
-      <NextCard step={step} onStep={onStep} onAsk={onAsk} />
+      <NextCard step={step} onStep={onStep} onAsk={onAsk} nextRef={nextRef} />
 
       <View style={styles.week}>
         <View style={styles.flames}>
@@ -152,7 +214,17 @@ export function TodayHero({
   );
 }
 
-function NextCard({ step, onStep, onAsk }: { step: NextStep; onStep: () => void; onAsk: () => void }) {
+function NextCard({
+  step,
+  onStep,
+  onAsk,
+  nextRef,
+}: {
+  step: NextStep;
+  onStep: () => void;
+  onAsk: () => void;
+  nextRef?: RefObject<View | null>;
+}) {
   let kicker = 'Next';
   let title = '';
   let detail = '';
@@ -184,7 +256,7 @@ function NextCard({ step, onStep, onAsk }: { step: NextStep; onStep: () => void;
   }
 
   return (
-    <View style={styles.next}>
+    <View ref={nextRef} collapsable={false} style={styles.next}>
       <View style={styles.nextText}>
         <View style={styles.nextKicker}>
           <Icon name="bolt" size={icon.small} color={palette.accentSoft} />
@@ -235,7 +307,7 @@ function NextCard({ step, onStep, onAsk }: { step: NextStep; onStep: () => void;
 
 const styles = StyleSheet.create({
   hero: {
-    backgroundColor: palette.surface,
+    backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
     borderRadius: radius.xl + 4,
     borderWidth: 1,
     borderColor: alpha(palette.accent, 0.18),
@@ -249,11 +321,14 @@ const styles = StyleSheet.create({
   greetingCompact: { fontSize: 28, lineHeight: 34 },
   status: { fontSize: 17 },
   level: { marginTop: space.sm, gap: 6 },
+  inline: { flexDirection: 'row', alignItems: 'center' },
   levelText: { fontSize: 15 },
-  xpTrack: { height: 6, borderRadius: 3, backgroundColor: alpha(palette.text, 0.08), overflow: 'hidden', maxWidth: 240 },
-  xpFill: { height: 6, borderRadius: 3, backgroundColor: palette.accentSoft },
   ringNum: { fontSize: 34, lineHeight: 38 },
   ringNumCompact: { fontSize: 28, lineHeight: 32 },
+  // The figures sit over the flame, so they carry a shadow of the dark behind them.
+  overFlame: { textShadowColor: alpha(palette.bg, 0.9), textShadowRadius: 10 },
+  // The ring flashes as a quest lands in it.
+  flash: { ...StyleSheet.absoluteFill, boxShadow: `0px 0px 28px 6px ${alpha(palette.accent, 0.55)}` },
 
   next: {
     backgroundColor: alpha(palette.bg, 0.55),

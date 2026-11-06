@@ -158,6 +158,26 @@ export function suspendMusic(): void {
   }
 }
 
+let duckTimers: ReturnType<typeof setTimeout>[] = [];
+
+/**
+ * Lowers the bed under a level or rank sound so the ceremony is heard over it,
+ * then brings it back up in a few small steps rather than all at once.
+ */
+export function duckMusic(ms: number): void {
+  if (!player) return;
+  duckTimers.forEach(clearTimeout);
+  const set = (share: number) => {
+    try {
+      if (player) player.volume = BASE_VOLUME * share;
+    } catch (err) {
+      note(`volume unsupported: ${String(err)}`);
+    }
+  };
+  set(0.3);
+  duckTimers = [0.48, 0.66, 0.84, 1].map((share, i) => setTimeout(() => set(share), ms + i * 120));
+}
+
 export function resumeMusic(): void {
   suspended = false;
   if (enabled) start();

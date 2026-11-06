@@ -1,19 +1,39 @@
-import { useId } from 'react';
-import { View } from 'react-native';
+import { useId, useState } from 'react';
+import { Platform, View } from 'react-native';
 import Animated, { useReducedMotion } from 'react-native-reanimated';
 import Svg, { Circle, Defs, Ellipse, Path, RadialGradient, Stop } from 'react-native-svg';
 
+import { canDrawEmbers, EmberOrb, type EmberState } from '@/components/assistant/EmberOrb';
 import { alpha, gradient, palette } from '@/constants/theme';
 
 /**
  * Beerus: a glowing ember sphere with two narrow cat's eyes — the floating
  * button and the face at the top of the chat. `breathing` lets it swell
  * slowly while it waits for you, the one idle motion in the app; it holds
- * still when the system asks for reduced motion.
+ * still when the system asks for reduced motion. On the web, from the size of
+ * the floating button up, he is the living 3D ember version instead, and the
+ * rest of the props say what he is doing: thinking, his mood, a call's voice.
  */
-export function BeerusOrb({ size, breathing = false, glow = true }: { size: number; breathing?: boolean; glow?: boolean }) {
+export function BeerusOrb({
+  size,
+  breathing = false,
+  glow = true,
+  ...state
+}: {
+  size: number;
+  breathing?: boolean;
+  glow?: boolean;
+} & EmberState) {
   const id = useId().replace(/:/g, '');
   const reduced = useReducedMotion();
+  const [broken, setBroken] = useState(false);
+  if (Platform.OS === 'web' && size >= 48 && !broken && canDrawEmbers()) {
+    return (
+      <View style={{ width: size, height: size }}>
+        <EmberOrb size={size} {...state} onFail={() => setBroken(true)} />
+      </View>
+    );
+  }
   const r = size / 2;
   // Almond eyes, tilted up at the outer corners.
   const eye = (cx: number, tilt: number) => {

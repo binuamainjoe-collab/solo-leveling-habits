@@ -1,12 +1,18 @@
 import { router, useFocusEffect } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
+import { Pressable } from 'react-native-gesture-handler';
+import { MotionScroll } from '@/components/motion/MotionScroll';
+import { Rolling } from '@/components/motion/Rolling';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
+import { canDrawEmbers } from '@/components/assistant/EmberOrb';
 import { Card } from '@/components/system/Card';
 import { Radar } from '@/components/charts/Radar';
-import { Panel } from '@/components/system/Panel';
+import { AbilityCrystal } from '@/components/status/AbilityCrystal';
+import { RankHero } from '@/components/status/RankFire';
+import { StatusRail, useChapters, type Chapter } from '@/components/status/StatusRail';
+import { Panel, RangeSwitch } from '@/components/system/Panel';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { MonthCalendar } from '@/components/system/MonthCalendar';
 import { StatusHeader } from '@/components/system/StatusHeader';
@@ -20,6 +26,7 @@ import {
   space,
   STATS,
   statMeta,
+  type StatKey,
 } from '@/constants/theme';
 import { ACHIEVEMENTS } from '@/data/achievements';
 import { plannerConfigured } from '@/data/planner';
@@ -27,57 +34,140 @@ import { currentSession, listAccounts, signOut, type Account } from '@/lib/auth'
 import { supabaseConfigured } from '@/lib/supabase';
 import { QUESTS } from '@/data/quests';
 import { openAssistant } from '@/lib/assistantBus';
-import { playSound } from '@/lib/feedback';
+import { haptic, playSound } from '@/lib/feedback';
 import { useProgress } from '@/store/progress';
+
+/** The page's chapters, top to bottom, as the line down the right edge names them. */
+const CHAPTERS: Chapter[] = [
+  { key: 'rank', label: 'Rank' },
+  { key: 'abilities', label: 'Abilities' },
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'record', label: 'Record' },
+  { key: 'coverage', label: 'Coverage' },
+  { key: 'settings', label: 'Settings' },
+];
+
+const STAT_COLOURS = STATS.map((key) => statMeta[key].color);
 
 export default function HunterScreen() {
   const { state, resetAll, setSetting } = useProgress();
   const { width, wide } = useContentWidth();
   // The stat furthest behind, for the one button that helps with it.
   const weakest = STATS.reduce((low, key) => ((state.stats[key] ?? 0) < (state.stats[low] ?? 0) ? key : low), STATS[0]);
+  // The ability the crystal faces: the weakest, its dent toward you, until
+  // you turn it or pick another score. Beerus is asked about this one.
+  const [picked, setPicked] = useState<StatKey | null>(null);
+  const faced = picked ?? weakest;
+  const values = useMemo(() => STATS.map((key) => state.stats[key] ?? 0), [state.stats]);
+  const threeD = canDrawEmbers();
+  const [abilityView, setAbilityView] = useState<'crystal' | 'chart'>('crystal');
+  const [calendarView, setCalendarView] = useState<'calendar' | 'city'>('calendar');
+  const chapters = useChapters(CHAPTERS.length);
 
   const maxCategory = Math.max(...CATEGORIES.map((c) => state.categoryDays[c] ?? 0), 1);
 
   return (
     <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <StatusHeader />
+      <View style={styles.root} {...({ dataSet: { statusRoot: '1' } } as object)}>
+      <MotionScroll
+        onScroller={chapters.attach}
+        onContentSizeChange={chapters.onContentSize}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+        {...({ dataSet: { statusScroll: '1' } } as object)}>
+        <View onLayout={chapters.onChapter(0)}>
+          <RankHero width={width} />
+          <StatusHeader />
+        </View>
 
         {/* Ability scores — Life Reset's "Your Rating": tiny caps label on the
             left, an oversized numeral hard-right, hairline between rows. The
             numbers are the hero here, not the labels. */}
-        <Animated.View entering={FadeInDown.duration(360)}>
-          <Panel iconName="radar" title="Ability scores" sub="The shape of your training. A dent is a side of life being left behind." style={styles.block}>
+        <Animated.View entering={FadeInDown.duration(360)} onLayout={chapters.onChapter(1)}>
+          <Panel
+            iconName="radar"
+            title="Ability scores"
+            sub="The shape of your training. A dent is a side of life being left behind."
+            right={
+              threeD ? (
+                <RangeSwitch
+                  options={[
+                    { value: 'crystal', label: 'Crystal' },
+                    { value: 'chart', label: 'Chart' },
+                  ]}
+                  value={abilityView}
+                  onChange={setAbilityView}
+                />
+              ) : null
+            }
+            style={styles.block}>
             <View style={[styles.abilities, wide && styles.abilitiesWide]}>
               <View style={styles.radar}>
-                <Radar
-                  size={Math.min(300, width - 64)}
-                  axes={STATS.map((key) => ({ key, label: statMeta[key].label, value: state.stats[key] ?? 0, color: statMeta[key].color }))}
-                />
+                {threeD && abilityView === 'crystal' ? (
+                  <AbilityCrystal
+                    size={Math.min(300, width - 64)}
+                    values={values}
+                    colours={STAT_COLOURS}
+                    facing={STATS.indexOf(faced)}
+                    onFacing={(i) => {
+                      haptic('tick');
+                      setPicked(STATS[i]);
+                    }}
+                  />
+                ) : (
+                  <Radar
+                    size={Math.min(300, width - 64)}
+                    axes={STATS.map((key) => ({ key, label: statMeta[key].label, value: state.stats[key] ?? 0, color: statMeta[key].color }))}
+                  />
+                )}
               </View>
               <View style={styles.ratingList}>
                 {STATS.map((key, i) => {
                   const meta = statMeta[key];
                   const value = state.stats[key] ?? 0;
+                  const on = key === faced;
                   return (
-                    <View key={key} style={[styles.ratingRow, i > 0 && styles.ratingDivider]}>
-                      <SystemText variant="title" color={meta.color} style={styles.ratingGlyph}>
-                        {meta.glyph}
-                      </SystemText>
-                      <SystemText variant="body" color={palette.text} style={styles.ratingName}>
-                        {meta.label}
-                      </SystemText>
-                      <SystemText variant="numeral" color={meta.color} style={styles.ratingValue}>
-                        {value}
-                      </SystemText>
-                    </View>
+                    <Pressable
+                      key={key}
+                      onPress={() => {
+                        if (on) return;
+                        playSound('tap');
+                        setPicked(key);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${meta.label}, ${value}`}
+                      accessibilityState={{ selected: on }}>
+                      <Animated.View
+                        style={[
+                          styles.ratingRow,
+                          i > 0 && styles.ratingDivider,
+                          {
+                            backgroundColor: on ? alpha(meta.color, 0.1) : 'transparent',
+                            transitionProperty: 'backgroundColor',
+                            transitionDuration: '160ms',
+                          },
+                        ]}>
+                        <SystemText variant="title" color={meta.color} style={styles.ratingGlyph}>
+                          {meta.glyph}
+                        </SystemText>
+                        <SystemText variant="body" color={palette.text} style={styles.ratingName}>
+                          {meta.label}
+                        </SystemText>
+                        <Rolling text={String(value)} lineHeight={34} color={meta.color} style={styles.ratingValue} />
+                      </Animated.View>
+                    </Pressable>
                   );
                 })}
                 <GhostButton
-                  label={`Ask Beerus how to raise ${statMeta[weakest].label}`}
+                  label={`Ask Beerus how to raise ${statMeta[faced].label}`}
                   onPress={() => {
                     playSound('tap');
-                    openAssistant('chat', `My weakest stat is ${statMeta[weakest].label} (${state.stats[weakest] ?? 0}). Which quests would raise it, sized for my days?`);
+                    openAssistant(
+                      'chat',
+                      faced === weakest
+                        ? `My weakest stat is ${statMeta[faced].label} (${state.stats[faced] ?? 0}). Which quests would raise it, sized for my days?`
+                        : `I want to raise ${statMeta[faced].label} (${state.stats[faced] ?? 0}). Which quests would do it, sized for my days?`,
+                    );
                   }}
                 />
               </View>
@@ -86,17 +176,29 @@ export default function HunterScreen() {
         </Animated.View>
 
         {/* 30-day activity, straight off the day log */}
-        <Animated.View entering={FadeInDown.duration(360).delay(60)}>
-          <SystemText variant="label" style={styles.sectionLabel}>
-            Calendar
-          </SystemText>
-          <Card style={styles.block} contentStyle={styles.activityInner}>
-            <MonthCalendar />
+        <Animated.View entering={FadeInDown.duration(360).delay(60)} onLayout={chapters.onChapter(2)}>
+          <View style={styles.labelRow}>
+            <SystemText variant="label" style={[styles.sectionLabel, styles.labelInRow]}>
+              Calendar
+            </SystemText>
+            {threeD ? (
+              <RangeSwitch
+                options={[
+                  { value: 'calendar', label: 'Calendar' },
+                  { value: 'city', label: 'City' },
+                ]}
+                value={calendarView}
+                onChange={setCalendarView}
+              />
+            ) : null}
+          </View>
+          <Card reveal style={styles.block} contentStyle={styles.activityInner}>
+            <MonthCalendar view={calendarView} />
           </Card>
         </Animated.View>
 
         {/* Lifetime record */}
-        <Animated.View entering={FadeInDown.duration(360).delay(80)}>
+        <Animated.View entering={FadeInDown.duration(360).delay(80)} onLayout={chapters.onChapter(3)}>
           <SystemText variant="label" style={styles.sectionLabel}>
             Hunter record
           </SystemText>
@@ -115,11 +217,11 @@ export default function HunterScreen() {
         </Animated.View>
 
         {/* Discipline coverage */}
-        <Animated.View entering={FadeInDown.duration(360).delay(160)}>
+        <Animated.View entering={FadeInDown.duration(360).delay(160)} onLayout={chapters.onChapter(4)}>
           <SystemText variant="label" style={styles.sectionLabel}>
             Discipline coverage
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
               Days you cleared at least one quest in each discipline.
             </SystemText>
@@ -161,11 +263,11 @@ export default function HunterScreen() {
         </Animated.View>
 
         {/* Board summary + reset */}
-        <Animated.View entering={FadeInDown.duration(360).delay(240)}>
+        <Animated.View entering={FadeInDown.duration(360).delay(240)} onLayout={chapters.onChapter(5)}>
           <SystemText variant="label" style={styles.sectionLabel}>
             System
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             <Toggle
               label="Sound effects"
               hint="A tick on every press, a chime when a quest is cleared."
@@ -189,12 +291,19 @@ export default function HunterScreen() {
               value={state.settings?.music ?? true}
               onChange={(v) => setSetting('music', v)}
             />
+            <View style={styles.toggleDivider} />
+            <Toggle
+              label="Low power"
+              hint="Holds the world behind your screens and the streak flame still, and calms Beerus. The world also softens by itself on a busy phone."
+              value={state.settings?.lowPower ?? false}
+              onChange={(v) => setSetting('lowPower', v)}
+            />
           </Card>
 
           <SystemText variant="label" style={styles.sectionLabel}>
             Reminders
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             {Platform.OS === 'web' ? (
               <SystemText variant="meta" style={styles.notConnected}>
                 Reminders arrive on the phone app. The browser cannot schedule them.
@@ -225,7 +334,7 @@ export default function HunterScreen() {
           <SystemText variant="label" style={styles.sectionLabel}>
             Profile
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
               What Beerus knows about your life: studies, routine, training, habits, and the
               timetables and documents you gave it. It plans and suggests quests from this.
@@ -242,14 +351,14 @@ export default function HunterScreen() {
           <SystemText variant="label" style={styles.sectionLabel}>
             Account
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             <AccountBlock />
           </Card>
 
           <SystemText variant="label" style={styles.sectionLabel}>
             Planner reminder
           </SystemText>
-          <Card style={styles.block}>
+          <Card reveal style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
               From this hour, the Quests board quietly offers to plan tomorrow with you. It never
               takes over the screen.
@@ -279,7 +388,7 @@ export default function HunterScreen() {
             )}
           </Card>
 
-          <Card tint={palette.negative} style={styles.block}>
+          <Card reveal tint={palette.negative} style={styles.block}>
             <SystemText variant="body" style={styles.blockSub}>
               {state.activeQuestIds.length} of {QUESTS.length} quests on your board. Resetting
               wipes all progress, stats and trophies — it cannot be undone.
@@ -287,7 +396,11 @@ export default function HunterScreen() {
             <DangerButton onPress={resetAll} />
           </Card>
         </Animated.View>
-      </ScrollView>
+      </MotionScroll>
+      {chapters.ready ? (
+        <StatusRail chapters={CHAPTERS} ticks={chapters.ticks} current={chapters.current} onJump={chapters.jump} />
+      ) : null}
+      </View>
     </Screen>
   );
 }
@@ -358,11 +471,14 @@ function Record({
   tint: string;
 }) {
   return (
-    <Card raised style={styles.record} contentStyle={styles.recordInner}>
+    <Card reveal raised style={styles.record} contentStyle={styles.recordInner}>
       <SystemText variant="label">{label}</SystemText>
-      <SystemText variant="numeral" color={tint} style={styles.recordValue}>
-        {typeof value === 'number' ? value.toLocaleString('en-US') : value}
-      </SystemText>
+      <Rolling
+        text={typeof value === 'number' ? value.toLocaleString('en-US') : value}
+        lineHeight={34}
+        color={tint}
+        style={styles.recordValue}
+      />
     </Card>
   );
 }
@@ -552,8 +668,11 @@ function DangerButton({ onPress }: { onPress: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   scroll: { paddingBottom: space.xxl * 2 },
   sectionLabel: { marginBottom: space.sm, marginLeft: 2, color: palette.textMuted },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.sm },
+  labelInRow: { marginBottom: 0 },
   block: { marginBottom: space.xl },
   blockSub: { fontSize: 13, lineHeight: 18, marginBottom: space.md },
 
@@ -563,7 +682,14 @@ const styles = StyleSheet.create({
   abilitiesWide: { flexDirection: 'row', alignItems: 'center' },
   radar: { alignItems: 'center' },
   ratingList: { flex: 1, minWidth: 0, gap: space.sm },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 2 },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: 2,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+  },
   ratingDivider: { borderTopWidth: 1, borderTopColor: palette.border },
   ratingGlyph: { width: 18, fontSize: 14 },
   ratingName: { flex: 1, fontSize: 15 },

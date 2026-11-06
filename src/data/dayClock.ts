@@ -105,21 +105,28 @@ export interface Placed<Q> {
   quest: Q;
   /** Day-minutes. */
   minutes: number;
-  /** Why it is there: the plan put it there, its own time window, or it is a morning/evening thing. */
-  source: 'plan' | 'window' | 'usual';
+  /**
+   * Why it is there: you put it there yourself, the plan put it there, its
+   * own time window, or it is a morning/evening thing.
+   */
+  source: 'slot' | 'plan' | 'window' | 'usual';
 }
 
+/** Times you gave quests yourself, by dragging them onto the clock: questId -> day-minutes, for one day. */
+export type Slots = Record<string, number>;
+
 /**
- * Put each quest on the clock. In order of trust: the plan placed it at a
- * time; its own window says when ("in bed by 23:00", "no food after 20:00");
- * it is something people do in the morning or the evening. Anything else
- * has no time and floats inside the ring.
+ * Put each quest on the clock. In order of trust: you put it at a time
+ * yourself; the plan placed it at a time; its own window says when ("in bed
+ * by 23:00", "no food after 20:00"); it is something people do in the
+ * morning or the evening. Anything else has no time and floats inside the ring.
  */
 export function placeQuests<Q extends ClockQuest>(
   quests: Q[],
   blocks: PlanBlock[],
   wake: string,
   sleep: string,
+  slots: Slots = {},
 ): { placed: Placed<Q>[]; floating: Q[] } {
   const span = spanOf(wake, sleep);
   const clamp = (m: number) => Math.max(span.start, Math.min(span.end, m));
@@ -133,6 +140,11 @@ export function placeQuests<Q extends ClockQuest>(
   const placed: Placed<Q>[] = [];
   const floating: Q[] = [];
   for (const q of quests) {
+    const slot = slots[q.id];
+    if (slot !== undefined) {
+      placed.push({ quest: q, minutes: clamp(slot), source: 'slot' });
+      continue;
+    }
     const block = blocks.find((b) => b.questId === q.id);
     if (block) {
       placed.push({ quest: q, minutes: clamp(dayMinutes(block.start, wake)), source: 'plan' });
@@ -149,6 +161,80 @@ export function placeQuests<Q extends ClockQuest>(
     else floating.push(q);
   }
   return { placed, floating };
+}
+
+/** The step a finger moves through on the ring, as the clock face reads it out. */
+export const CLOCK_STEP = 5;
+
+/** The time at a point along the ring (0–1), on a five-minute step. */
+export function minutesAt(fraction: number, span: Span): number {
+  const stops = Math.max(1, Math.round((span.end - span.start) / CLOCK_STEP));
+  return span.start + Math.round(Math.max(0, Math.min(1, fraction)) * stops) * CLOCK_STEP;
+}
+
+/** A time moved earlier or later by `by` minutes, kept inside the waking day. */
+export function nudge(minutes: number, by: number, span: Span): number {
+  return Math.max(span.start, Math.min(span.end, minutes + by));
+}
+
+/**
+ * Where a quest goes when it is given a time by button rather than by drag:
+ * the next quarter hour from now, or an hour after waking on a day that has
+ * not started. Never outside the waking day.
+ */
+export function firstFreeTime(now: number | null, span: Span): number {
+  const from = now === null ? span.start + 60 : Math.floor(now / 15) * 15 + 15;
+  return Math.max(span.start, Math.min(span.end, from));
+}
+
+/**
+ * The quest to warn about: the first one not yet done whose time is coming up
+ * in the next `ahead` minutes, or came in the last `grace` (just started is
+ * still now). Null when nothing is close, so the clock stays still.
+ */
+export function nextUp(
+  icons: readonly { id: string; minutes: number | null; done: boolean }[],
+  now: number,
+  ahead = 45,
+  grace = 10,
+): string | null {
+  let best: { id: string; minutes: number } | null = null;
+  for (const i of icons) {
+    if (i.done || i.minutes === null) continue;
+    if (i.minutes < now - grace || i.minutes > now + ahead) continue;
+    if (!best || i.minutes < best.minutes) best = { id: i.id, minutes: i.minutes };
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * Part of the ring from `f0` to `f1` (0–1) cut at `cut`: what is already
+ * behind you and what is still ahead. Either can be null.
+ */
+export function splitAt(f0: number, f1: number, cut: number): { past: [number, number] | null; ahead: [number, number] | null } {
+  if (cut <= f0) return { past: null, ahead: [f0, f1] };
+  if (cut >= f1) return { past: [f0, f1], ahead: null };
+  return { past: [f0, cut], ahead: [cut, f1] };
+}
+
+/** The slots worth keeping: today's and later. A day that is over has no use for them. */
+export function keepSlots(all: Record<string, Slots>, today: string): Record<string, Slots> {
+  const out: Record<string, Slots> = {};
+  for (const [date, slots] of Object.entries(all)) {
+    if (date >= today && Object.keys(slots).length > 0) out[date] = slots;
+  }
+  return out;
+}
+
+/** The seven days, Monday first, of the week a date falls in. */
+export function weekOf(date: string): string[] {
+  const [y, m, d] = date.split('-').map(Number);
+  const at = new Date(y, m - 1, d);
+  at.setDate(at.getDate() - ((at.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(at.getFullYear(), at.getMonth(), at.getDate() + i);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  });
 }
 
 /**

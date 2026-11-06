@@ -6,7 +6,7 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -16,12 +16,17 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { GestureHandlerRootView, Pressable, ScrollView } from 'react-native-gesture-handler';
+import { GestureDetector, GestureHandlerRootView, Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BeerusActor, beerusSlot } from '@/components/assistant/BeerusActor';
 import { BeerusComposer, MODE_LABEL, type ChatMode } from '@/components/assistant/BeerusComposer';
 import { BeerusOrb } from '@/components/assistant/BeerusOrb';
+import { FloatingOrb } from '@/components/assistant/FloatingOrb';
+import { summon } from '@/components/assistant/summon';
+import { onLanding } from '@/components/motion/flight';
+import { useDragSheet } from '@/components/motion/useDragSheet';
 import { ChatError, ModelLine, Typing, UserBubble } from '@/components/chat/ChatParts';
 import { Icon, type IconName } from '@/components/system/Icon';
 import { SystemText } from '@/components/system/SystemText';
@@ -50,7 +55,16 @@ import { feedback, playSound } from '@/lib/feedback';
 import { resumeMusic, suspendMusic } from '@/lib/music';
 import { readClip, speak, stopSpeaking, type VoiceClip } from '@/lib/voice';
 import { archiveGoal, fetchGoalState, focusGoal, setGoal } from '@/lib/shadows';
-import { useActiveQuests, useDayStats, useProgress } from '@/store/progress';
+import { moodFor, PROUD_MS, type Mood } from '@/lib/beerus';
+import { isComplete, useActiveQuests, useDayStats, useProgress } from '@/store/progress';
+
+/** Test copies only: a button that runs Beerus through his states, since a copy without keys can't. */
+const DEMO = process.env.EXPO_PUBLIC_BEERUS_DEMO === '1';
+const DEMO_STATES = ['as he is', 'thinking', 'voice', 'proud', 'angry'] as const;
+const demoVoice = () => {
+  const t = performance.now() / 1000;
+  return Math.max(0, Math.sin(t * 9) * 0.5 + Math.sin(t * 3.7) * 0.45);
+};
 
 /** Tab route name to the name the System calls that screen. */
 const SCREEN_NAME: Record<string, string> = {
@@ -80,6 +94,14 @@ export function SystemAssistant() {
   const request = useAssistantRequest();
   const [seenSeq, setSeenSeq] = useState(0);
   const pending = request && request.seq > seenSeq ? request : null;
+  const dayMood = useBeerusMood();
+  const lift = useCallback(() => Math.min(1, summon.get()), []);
+  const [demo, setDemo] = useState(0);
+  const lowPower = state.settings?.lowPower ?? false;
+  // True from the moment the window's Beerus sets off until he is home again.
+  const [flying, setFlying] = useState(false);
+  const shown = DEMO_STATES[demo];
+  const mood = shown === 'proud' || shown === 'angry' ? shown : dayMood;
 
   const onTabs = segments[0] === '(tabs)';
   if (!ready || !onboarded || (!onTabs && !pending)) return null;
@@ -91,29 +113,50 @@ export function SystemAssistant() {
 
   const close = () => {
     setOpen(false);
+    setFlying(false);
     if (request) setSeenSeq(request.seq);
   };
 
   return (
     <>
       {onTabs ? (
-      <View pointerEvents="box-none" style={[styles.fabWrap, { bottom: insets.bottom + 76 }]}>
-        <Pressable
+        <FloatingOrb
+          bottom={insets.bottom + 76}
+          top={insets.top + space.sm}
+          hidden={flying}
+          label={cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}
           onPress={() => {
             playSound('tap');
             // Start reading today's calendar while the sheet opens; the
             // first message awaits this same cached read.
             void calendarFor(state.date);
             setOpen(true);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}>
+          }}>
           <View style={styles.fab}>
-            <BeerusOrb size={60} />
+            <BeerusOrb
+              size={60}
+              mood={mood}
+              busy={shown === 'thinking'}
+              voice={shown === 'voice' ? demoVoice : undefined}
+              canSleep
+              slow={lowPower}
+              paused={flying}
+              lift={lift}
+            />
             {cue ? <View style={styles.cue} /> : null}
           </View>
+        </FloatingOrb>
+      ) : null}
+      {DEMO && onTabs ? (
+        <Pressable
+          onPress={() => setDemo((d) => (d + 1) % DEMO_STATES.length)}
+          style={[styles.demo, { bottom: insets.bottom + 84 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Show Beerus in another state">
+          <SystemText variant="meta" color={palette.text}>
+            Beerus: {shown} · tap
+          </SystemText>
         </Pressable>
-      </View>
       ) : null}
       {open || pending ? (
         <AssistantSheet
@@ -121,24 +164,66 @@ export function SystemAssistant() {
           screen={onTabs ? screen : 'Profile'}
           initialMode={pending?.mode ?? 'chat'}
           initialPrompt={pending?.prompt}
-          onClose={close}
+          mood={mood}
+          onLaunch={() => setFlying(true)}
+          onClosed={close}
         />
       ) : null}
     </>
   );
 }
 
+/**
+ * What Beerus feels about the day, for his colour and eyes: proud for a moment
+ * after a quest lands in the ring or all day once the board is clear, angry
+ * late in the evening while mandatory quests are still open. Checked again
+ * every half minute, so the evening turn needs no tap to show.
+ */
+function useBeerusMood(): Mood {
+  const { state } = useProgress();
+  const board = useActiveQuests();
+  const [proud, setProud] = useState(false);
+  const [hour, setHour] = useState(() => new Date().getHours());
+  useEffect(() => {
+    let wear: ReturnType<typeof setTimeout> | undefined;
+    const stop = onLanding(() => {
+      setProud(true);
+      clearTimeout(wear);
+      wear = setTimeout(() => setProud(false), PROUD_MS);
+    });
+    const clock = setInterval(() => setHour(new Date().getHours()), 30_000);
+    return () => {
+      stop();
+      clearTimeout(wear);
+      clearInterval(clock);
+    };
+  }, []);
+  const open = board.filter((q) => !isComplete(q, state.values[q.id] ?? 0));
+  return moodFor({
+    hour,
+    mandatoryLeft: open.filter((q) => q.penalty).length,
+    boardLeft: open.length,
+    boardTotal: board.length,
+    sinceLanding: proud ? 0 : null,
+  });
+}
+
 function AssistantSheet({
   screen,
   initialMode,
   initialPrompt,
-  onClose,
+  mood,
+  onLaunch,
+  onClosed,
 }: {
   screen: string;
   initialMode: AssistantMode;
   /** Asked as soon as the history is in, when a screen opened Beerus with a question. */
   initialPrompt?: string;
-  onClose: () => void;
+  mood: Mood;
+  /** Beerus has left the floating button to fly up to the window. */
+  onLaunch: () => void;
+  onClosed: () => void;
 }) {
   const { state, setQuestOverride, toggleActive, setProgress, setSetting } = useProgress();
   const board = useActiveQuests();
@@ -173,7 +258,13 @@ function AssistantSheet({
   const [showEarlier, setShowEarlier] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const { width } = useWindowDimensions();
+  const { width, height: screenHeight } = useWindowDimensions();
+  // The whole window is a sheet: pull the header down or flick it away, and
+  // the app is there underneath. It opens by unrolling under Beerus as he flies
+  // up (the CSS in src/app/+html.tsx), so it starts in place; once it has gone,
+  // he flies home, and only then is the window let go.
+  const [leaving, setLeaving] = useState(false);
+  const { close: onClose, pan: dragClosed, sheetStyle } = useDragSheet(screenHeight, () => setLeaving(true), true);
   const wide = width >= WIDE;
 
   // Push-to-talk: tap the mic, speak, tap send. Replies to spoken messages
@@ -589,6 +680,9 @@ function AssistantSheet({
     callRef.current?.end();
   }
 
+  /** How loud the call is, read by Beerus every frame so his body moves with the voice. */
+  const liveLevel = useCallback(() => callRef.current?.level() ?? 0, []);
+
 
   async function undoLive(index: number, ids: string[]) {
     playSound('tap');
@@ -873,14 +967,14 @@ function AssistantSheet({
   ];
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       {/* Modal content renders outside the app's root view on Android, so it
           needs its own gesture root or none of its buttons respond. */}
       <GestureHandlerRootView style={styles.flex}>
-        <View style={[styles.window, { paddingTop: insets.top }]}>
+        <Animated.View {...({ dataSet: { unroll: '1' } } as object)} style={[styles.window, { paddingTop: insets.top }, sheetStyle]}>
           {wide ? (
             <View style={[styles.rail, { paddingBottom: insets.bottom + space.lg }]}>
-              <BeerusOrb size={32} glow={false} />
+              <View {...beerusSlot('header')} style={styles.railSlot} />
               <View style={styles.railGap} />
               <RailButton name="compose" label="New chat" onPress={newChat} />
               <RailButton name="history" label="Earlier conversation" onPress={() => setShowEarlier(true)} disabled={!hasEarlier} />
@@ -906,7 +1000,9 @@ function AssistantSheet({
           ) : null}
 
           <KeyboardAvoidingView behavior="padding" style={styles.flex}>
-            <View style={styles.header}>
+            <GestureDetector gesture={dragClosed} touchAction="none">
+            <View style={styles.header} collapsable={false}>
+              {!wide ? <View {...beerusSlot('header')} style={styles.headerSlot} /> : null}
               <View style={styles.headerText}>
                 <SystemText variant="title">Beerus</SystemText>
                 <SystemText variant="meta" numberOfLines={1}>
@@ -971,12 +1067,13 @@ function AssistantSheet({
                 </Pressable>
               ) : null}
             </View>
+            </GestureDetector>
 
             {fresh ? (
               <ScrollView style={styles.flex} contentContainerStyle={styles.freshScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 <View style={styles.column}>
                   <View style={styles.freshHead}>
-                    <BeerusOrb size={wide ? 108 : 88} breathing />
+                    <View {...beerusSlot('hero')} style={wide ? styles.heroSlotWide : styles.heroSlot} />
                     <View>
                       <SystemText variant="heading" style={styles.hello}>
                         {hello}
@@ -1050,6 +1147,7 @@ function AssistantSheet({
                               undone={m.undone}
                               canUndo={m.canUndo}
                               onUndo={() => void undoChanges(i)}
+                              pointKey={i === lastModel ? `msg${i}` : undefined}
                             />
                           ) : null}
                           {m.role === 'model' && m.remembered && m.remembered.length > 0 ? (
@@ -1086,6 +1184,7 @@ function AssistantSheet({
                             undone={t.undone}
                             canUndo={t.canUndo}
                             onUndo={() => void undoLive(i, t.undoIds ?? [])}
+                            pointKey={`live${i}`}
                           />
                         </View>
                       ),
@@ -1130,7 +1229,15 @@ function AssistantSheet({
               </>
             )}
           </KeyboardAvoidingView>
-        </View>
+        </Animated.View>
+        <BeerusActor
+          leaving={leaving}
+          onHome={onClosed}
+          onLaunch={onLaunch}
+          busy={busy || voiceState === 'sending'}
+          mood={mood}
+          voice={liveState !== 'off' ? liveLevel : undefined}
+        />
       </GestureHandlerRootView>
     </Modal>
   );
@@ -1161,24 +1268,31 @@ function RailButton({ name, label, onPress, disabled }: { name: IconName; label:
   );
 }
 
-/** What the System changed on one reply or call turn, with Undo. */
+/**
+ * What the System changed on one reply or call turn, with Undo. The newest
+ * carries a spot by its corner, and Beerus flies to it for a moment: he
+ * points at what he just did.
+ */
 function ChangesCard({
   applied,
   refused,
   undone,
   canUndo,
   onUndo,
+  pointKey,
 }: {
   applied?: string[];
   refused?: string[];
   undone?: boolean;
   canUndo?: boolean;
   onUndo: () => void;
+  pointKey?: string;
 }) {
   return (
     <>
       {applied && applied.length > 0 ? (
         <View style={[styles.changes, undone && styles.changesUndone]}>
+          {pointKey && !undone ? <View {...beerusSlot('point', pointKey)} style={styles.pointSlot} pointerEvents="none" /> : null}
           <View style={styles.changesHead}>
             <Icon name={undone ? 'undo' : 'check'} size={icon.small} color={undone ? palette.textFaint : palette.positive} />
             <SystemText variant="meta" color={undone ? palette.textFaint : palette.positive} style={styles.changesKicker}>
@@ -1267,29 +1381,15 @@ const LIVE_STATUS: Record<Exclude<LiveState, 'ended'>, string> = {
 };
 
 /**
- * In place of the composer during a call: a breathing orb that quickens
- * while the System speaks, what is happening in words, and one way out.
+ * In place of the composer during a call: Beerus himself, flown down from the
+ * header, his body rippling with whoever is talking; what is happening in
+ * words; and one way out.
  */
 function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () => void; bottomInset: number }) {
   const key = state === 'ended' ? 'connecting' : state;
   return (
     <View style={[styles.livePanel, { paddingBottom: bottomInset + space.md }]}>
-      <Animated.View
-        style={[
-          styles.orb,
-          state === 'speaking' && styles.orbSpeaking,
-          {
-            animationName: { from: { transform: [{ scale: 0.92 }] }, to: { transform: [{ scale: 1.08 }] } },
-            animationDuration: state === 'speaking' ? '450ms' : '1600ms',
-            animationIterationCount: 'infinite',
-            animationDirection: 'alternate',
-            animationTimingFunction: 'ease-in-out',
-          },
-        ]}>
-        <SystemText variant="title" color={palette.bg} style={styles.orbGlyph}>
-          ◆
-        </SystemText>
-      </Animated.View>
+      <View {...beerusSlot('live')} style={styles.liveSlot} />
       <SystemText variant="body" color={palette.textMuted} style={styles.liveStatus}>
         {LIVE_STATUS[key]}
       </SystemText>
@@ -1338,7 +1438,6 @@ const INDENT = 38;
 const styles = StyleSheet.create({
   flex: { flex: 1 },
 
-  fabWrap: { position: 'absolute', right: space.lg },
   fab: { width: 60, height: 60 },
   cue: {
     position: 'absolute',
@@ -1352,7 +1451,7 @@ const styles = StyleSheet.create({
     borderColor: palette.bg,
   },
 
-  window: { flex: 1, flexDirection: 'row', backgroundColor: palette.bg },
+  window: { flex: 1, flexDirection: 'row', backgroundColor: palette.bg, willChange: 'transform' } as object,
   rail: {
     width: 72,
     alignItems: 'center',
@@ -1430,6 +1529,24 @@ const styles = StyleSheet.create({
   },
   chipLit: { borderColor: alpha(palette.accent, 0.5), backgroundColor: alpha(palette.accent, 0.1) },
   headerText: { flex: 1, minWidth: 0, gap: 2 },
+  demo: {
+    position: 'absolute',
+    left: space.lg,
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.borderStrong,
+    backgroundColor: alpha(palette.surface, 0.9),
+  },
+  // Where Beerus sits, so the header keeps a place for him.
+  headerSlot: { width: 36, height: 36 },
+  railSlot: { width: 36, height: 36 },
+  heroSlot: { width: 88, height: 88 },
+  heroSlotWide: { width: 108, height: 108 },
+  liveSlot: { width: 104, height: 104 },
+  // Beside the corner of the newest change, where he points.
+  pointSlot: { position: 'absolute', top: -16, right: -10, width: 34, height: 34 },
   // Round 44pt buttons, like the close and action buttons on an iOS sheet.
   round: {
     width: HIT,
@@ -1531,17 +1648,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: palette.border,
   },
-  orb: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: palette.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: `0 0 32px ${alpha(palette.accent, 0.45)}`,
-  },
-  orbSpeaking: { boxShadow: `0 0 48px ${alpha(palette.accent, 0.75)}` },
-  orbGlyph: { fontSize: 28, lineHeight: 34 },
   liveStatus: { textAlign: 'center' },
   hangUp: {
     flexDirection: 'row',
