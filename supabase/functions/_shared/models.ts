@@ -3,8 +3,9 @@
  *
  * Three tiers:
  *   deep  — Gemini's flagship reasoning model. The typed assistant, the
- *           planner, Beru, Igris and the Steward: the work where the
- *           quality of the thinking is the product.
+ *           planner, Igris and the Steward: the work where the quality of
+ *           the thinking is the product. (Beru searches and reads on Flash;
+ *           see beru-scout.)
  *   voice — spoken messages. Also the flagship by default, but with a
  *           shorter wait (DEEP_TIMEOUT_MS.voice) before Flash answers, because
  *           a spoken reply that takes twenty seconds stops feeling like

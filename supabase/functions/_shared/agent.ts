@@ -170,6 +170,14 @@ export interface GeminiCall {
   prompt: string;
   /** Google Search grounding. Cannot be combined with `schema` — see below. */
   grounded?: boolean;
+  /**
+   * Gemini's URL context tool: the model may open up to 20 pages and read
+   * them. Grounding alone never does; the model writes from search
+   * snippets. With both, it searches and then reads what it found. The page
+   * text is billed as input (toolUsePromptTokenCount). Refused alongside
+   * `schema`, like grounding.
+   */
+  readPages?: boolean;
   /** A responseSchema for JSON mode. */
   schema?: unknown;
   /**
@@ -190,7 +198,8 @@ export interface GeminiCall {
   thinkingLevel?: 'low' | 'medium' | 'high';
   /**
    * Which model tier (see models.ts). Deep unless a caller says otherwise,
-   * so Beru, Igris and the Steward all get the flagship, with Flash behind.
+   * so Igris and the Steward get the flagship, with Flash behind. Beru asks
+   * for 'fast'.
    */
   tier?: Tier;
   /** How long a deep attempt may run before Flash is asked instead. */
@@ -237,6 +246,12 @@ export interface GeminiResult {
   /** Present only on a grounded call that actually searched. */
   sources?: { uri: string; title: string }[];
   /**
+   * Present only on a readPages call: every page the model tried to open,
+   * with Gemini's urlRetrievalStatus ("URL_RETRIEVAL_STATUS_SUCCESS",
+   * "..._PAYWALL", "..._UNSAFE", "..._ERROR").
+   */
+  pages?: { url: string; status: string }[];
+  /**
    * What Gemini says it served, or the model that failed. After a fallback,
    * every attempt in order ("gemini-4-argon:timeout>gemini-3.8-flash"; see
    * runModel), so the run log and the Steward's cost line see both.
@@ -254,14 +269,15 @@ export interface GeminiResult {
  * Grounding and JSON mode are mutually exclusive, and the failure is silent:
  * asking for a responseSchema alongside google_search turns the search off
  * and returns confidently ungrounded text. Rather than trust a caller to
- * remember that, this refuses the combination outright.
+ * remember that, this refuses the combination outright. Reading pages is
+ * held to the same rule until it is shown to behave differently.
  */
 export async function gemini(call: GeminiCall): Promise<GeminiResult> {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return { ok: false, error: 'The System is missing its model key.' };
 
-  if (call.grounded && call.schema) {
-    return { ok: false, error: 'Grounding and JSON mode cannot share a call.' };
+  if ((call.grounded || call.readPages) && call.schema) {
+    return { ok: false, error: 'Web tools and JSON mode cannot share a call.' };
   }
 
   const body: Record<string, unknown> = {
@@ -284,7 +300,10 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
     },
   };
   if (call.system) body.systemInstruction = { parts: [{ text: call.system }] };
-  if (call.grounded) body.tools = [{ google_search: {} }];
+  const tools = { grounded: call.grounded === true, readPages: call.readPages === true };
+  if (tools.grounded || tools.readPages) {
+    body.tools = [...(tools.grounded ? [{ google_search: {} }] : []), ...(tools.readPages ? [{ url_context: {} }] : [])];
+  }
 
   // Deep first, Flash behind it. Only a failure Flash might not share moves
   // on; anything the model actually answered is the answer.
@@ -300,7 +319,7 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
   for (let i = 0; i < models.length; i++) {
     const last = i === models.length - 1;
     const timeoutMs = attemptTimeout(last, call.deepTimeoutMs ?? DEEP_TIMEOUT_MS.background, budgetMs - (Date.now() - startedAt));
-    const attempt = await geminiOnce(models[i], body, key, call.grounded === true, startedAt, timeoutMs);
+    const attempt = await geminiOnce(models[i], body, key, tools, startedAt, timeoutMs);
     result = attempt.result;
     let status: Failure | 'answered' = attempt.status;
     // A 200 the caller cannot use is a failure like any other.
@@ -339,7 +358,7 @@ async function geminiOnce(
   model: string,
   body: Record<string, unknown>,
   key: string,
-  grounded: boolean,
+  tools: WebTools,
   startedAt: number,
   timeoutMs: number,
 ): Promise<{ result: GeminiResult; status: Failure | 'answered' }> {
@@ -371,23 +390,31 @@ async function geminiOnce(
     const error = res.status === 429 ? 'The model is rate limited. Try again in a minute.' : 'The model refused that request.';
     return { result: { ok: false, error, modelVersion: model }, status: res.status };
   }
-  const result = readEnvelope(raw, model, grounded, startedAt);
+  const result = readEnvelope(raw, model, tools, startedAt);
   // A 200 with nothing usable in it (blocked, empty, unreadable) falls back too.
   return result.ok ? { result, status: 'answered' } : { result: { ...result, modelVersion: model }, status: 'unusable' };
 }
 
+/** Which of Gemini's web tools a call was given. */
+interface WebTools {
+  grounded: boolean;
+  readPages: boolean;
+}
+
 /** Turn a 200 from Gemini into a result. */
-function readEnvelope(raw: string, model: string, grounded: boolean, startedAt: number): GeminiResult {
+function readEnvelope(raw: string, model: string, tools: WebTools, startedAt: number): GeminiResult {
 
   try {
     const data = JSON.parse(raw) as {
       candidates?: {
         content?: { parts?: { text?: string }[] };
         groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] };
+        urlContextMetadata?: { urlMetadata?: { retrievedUrl?: string; urlRetrievalStatus?: string }[] };
       }[];
       modelVersion?: string;
       usageMetadata?: {
         promptTokenCount?: number;
+        toolUsePromptTokenCount?: number;
         candidatesTokenCount?: number;
         thoughtsTokenCount?: number;
       };
@@ -395,9 +422,11 @@ function readEnvelope(raw: string, model: string, grounded: boolean, startedAt: 
     };
 
     // A non-thinking model omits thoughtsTokenCount entirely, so default
-    // rather than assume the key is there.
+    // rather than assume the key is there. Search results and the pages the
+    // model read arrive as tool-use tokens, counted apart from the prompt
+    // but billed like it, so they are input too.
     const usage: GeminiUsage = {
-      in: data.usageMetadata?.promptTokenCount ?? 0,
+      in: (data.usageMetadata?.promptTokenCount ?? 0) + (data.usageMetadata?.toolUsePromptTokenCount ?? 0),
       out: data.usageMetadata?.candidatesTokenCount ?? 0,
       thoughts: data.usageMetadata?.thoughtsTokenCount ?? 0,
     };
@@ -419,10 +448,15 @@ function readEnvelope(raw: string, model: string, grounded: boolean, startedAt: 
       .map((c) => ({ uri: c.web?.uri ?? '', title: c.web?.title ?? '' }))
       .filter((s) => s.uri.length > 0);
 
+    const pages = (candidate?.urlContextMetadata?.urlMetadata ?? [])
+      .map((m) => ({ url: m.retrievedUrl ?? '', status: m.urlRetrievalStatus ?? '' }))
+      .filter((p) => p.url.length > 0);
+
     return {
       ok: true,
       text,
-      sources: grounded ? sources : undefined,
+      sources: tools.grounded ? sources : undefined,
+      pages: tools.readPages ? pages : undefined,
       modelVersion: data.modelVersion ?? model,
       usage,
       durationMs: Date.now() - startedAt,

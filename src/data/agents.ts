@@ -39,11 +39,11 @@ export const AGENTS: AgentDef[] = [
     id: 'beru-scout',
     name: 'Beru',
     role: 'Scout',
-    blurb: 'Searches the world for anything that serves the current goal, and brings back what it finds.',
+    blurb: 'Searches the web for anything that serves the current goal, reads the best pages, and brings back what it finds.',
     rank: 'S',
     glyph: '◈',
     summonable: true,
-    // One grounded search, then one structuring pass.
+    // One search-and-read call, then one structuring pass.
     callCost: 2,
   },
   {
@@ -140,9 +140,10 @@ export interface Finding {
   goalId: string;
   title: string;
   /**
-   * Grounding hands back a Vertex AI Search redirect rather than the
-   * publisher's own address, and those expire. `title` is kept populated so a
-   * dead link still says what it was.
+   * The publisher's address. Grounding hands back an expiring Vertex AI
+   * Search redirect, which beru-scout follows before saving; a redirect is
+   * kept only when that failed. `title` is kept populated so a dead link
+   * still says what it was.
    */
   url: string | null;
   summary: string;

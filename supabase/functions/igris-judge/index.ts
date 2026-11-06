@@ -40,6 +40,8 @@ For each candidate, judge how much it actually serves the stated goal:
 - verdict: "skip", "skim", "read" or "must-read". Only call something must-read if the student would be worse off never seeing it.
 - reason: one plain sentence, said to the student, explaining the ruling. No hedging, no flattery.
 
+Beru opened and read the pages marked "read by Beru: yes", so their summaries describe the real page. For "no", Beru only saw a search result: be warier of those, and never rule one must-read on the strength of a snippet.
+
 Judge the candidates against each other, not in isolation. If three are similar, say so and rank them.`;
 
 const SCHEMA = {
@@ -112,7 +114,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: pending, error: pendingError } = await db
     .from('findings')
-    .select('id, title, url, summary')
+    .select('id, title, url, summary, page_read')
     .eq('goal_id', goal.id)
     .is('score', null)
     .order('created_at', { ascending: true })
@@ -135,7 +137,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const candidates = pending
     .map(
       (f) =>
-        `id: ${f.id}\ntitle: ${f.title}\nurl: ${f.url ?? '(none)'}\nsummary: ${f.summary ?? ''}`,
+        `id: ${f.id}\ntitle: ${f.title}\nurl: ${f.url ?? '(none)'}\n` +
+        `read by Beru: ${f.page_read ? 'yes' : 'no'}\nsummary: ${f.summary ?? ''}`,
     )
     .join('\n\n---\n\n');
 
