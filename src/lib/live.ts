@@ -119,6 +119,12 @@ export async function startLiveCall(
   let ready = false;
   /** Mid-exchange: the Player is talking or The System is answering. */
   let busy = false;
+  /**
+   * The thinking model says when it is working and when it is done
+   * (interactionStatus). Once it has, the end of a spoken turn no longer
+   * means it is idle: it may still be reasoning or waiting on a change.
+   */
+  let reportsStatus = false;
   /** Gemini warned this connection is ending; move at the next quiet moment. */
   let leaving = false;
   let tries = 0;
@@ -321,6 +327,13 @@ export async function startLiveCall(
 
     if (msg.voiceActivity?.type === 'ACTIVITY_START') busy = true;
 
+    // Google's examples put it at the top level and inside serverContent.
+    const status = msg.interactionStatus ?? msg.serverContent?.interactionStatus;
+    if (status === 'IN_PROGRESS') {
+      reportsStatus = true;
+      busy = true;
+    }
+
     const content = msg.serverContent;
     if (content) {
       if (content.modelTurn) busy = true;
@@ -336,9 +349,9 @@ export async function startLiveCall(
       if (content.inputTranscription?.text) handlers.onUserText(content.inputTranscription.text);
       if (content.outputTranscription?.text) handlers.onModelText(content.outputTranscription.text);
       if (content.turnComplete) {
-        busy = false;
+        if (!reportsStatus) busy = false;
         handlers.onTurnEnd();
-        if (leaving) moveOn();
+        if (leaving && !busy) moveOn();
       }
     }
 
@@ -361,6 +374,12 @@ export async function startLiveCall(
     const update = msg.sessionResumptionUpdate;
     if (update?.resumable && update.newHandle) handle = update.newHandle;
 
+    if (status === 'IDLE') {
+      reportsStatus = true;
+      busy = false;
+      if (leaving) moveOn();
+    }
+
     if (msg.goAway) {
       // Gemini ends connections, not the call. Move between exchanges, so
       // nothing is cut off, or just before the line goes if none comes.
@@ -379,6 +398,16 @@ export async function startLiveCall(
   outTap.connect(playCtx.destination);
   // Browsers start audio contexts suspended until a gesture; this runs from one.
   void playCtx.resume().catch(() => {});
+  // Held Beerus to open the call? The browser may not count a gesture until
+  // the finger lifts, so sound would stay off. Wake both sides on the next one.
+  if (playCtx.state === 'suspended' && typeof window !== 'undefined') {
+    const wake = () => {
+      void playCtx?.resume().catch(() => {});
+      void micCtx?.resume().catch(() => {});
+    };
+    window.addEventListener('pointerup', wake, { once: true });
+    window.addEventListener('touchend', wake, { once: true });
+  }
 
   connect();
 

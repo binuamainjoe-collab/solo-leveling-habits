@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react';
  * The floating assistant listens and opens itself in that mode.
  */
 
-export type AssistantMode = 'chat' | 'interview' | 'board' | 'live-interview';
+export type AssistantMode = 'chat' | 'interview' | 'board' | 'live' | 'live-interview';
 
 export interface AssistantRequest {
   mode: AssistantMode;

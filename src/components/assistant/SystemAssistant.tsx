@@ -89,6 +89,8 @@ export function SystemAssistant() {
   const segments = useSegments() as string[];
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
+  // Tapped: a chat. Held until the ring fills: straight into a live call.
+  const [fabMode, setFabMode] = useState<AssistantMode>('chat');
   // Another screen asked for The System in a mode (interview me, suggest
   // quests). A request is pending until the sheet it opened is closed.
   const request = useAssistantRequest();
@@ -107,6 +109,8 @@ export function SystemAssistant() {
   if (!ready || !onboarded || (!onTabs && !pending)) return null;
 
   const screen = SCREEN_NAME[segments[1] ?? 'index'] ?? 'Quests';
+  // Only where a live call can run: a browser with a microphone and sound.
+  const canHoldForLive = assistantConfigured() && liveSupported();
   const hour = new Date().getHours();
   // A quiet cue, not an alarm: evening, and tomorrow has nothing planned.
   const cue = (hour >= 20 || hour < 4) && !state.plans[addDays(state.date, 1)];
@@ -114,6 +118,7 @@ export function SystemAssistant() {
   const close = () => {
     setOpen(false);
     setFlying(false);
+    setFabMode('chat');
     if (request) setSeenSeq(request.seq);
   };
 
@@ -124,14 +129,24 @@ export function SystemAssistant() {
           bottom={insets.bottom + 76}
           top={insets.top + space.sm}
           hidden={flying}
-          label={cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}
+          label={`${cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}${canHoldForLive ? '. Hold for five seconds to start a live call' : ''}`}
           onPress={() => {
             playSound('tap');
             // Start reading today's calendar while the sheet opens; the
             // first message awaits this same cached read.
             void calendarFor(state.date);
+            setFabMode('chat');
             setOpen(true);
-          }}>
+          }}
+          onHold={
+            canHoldForLive
+              ? () => {
+                  void calendarFor(state.date);
+                  setFabMode('live');
+                  setOpen(true);
+                }
+              : undefined
+          }>
           <View style={styles.fab}>
             <BeerusOrb
               size={60}
@@ -160,9 +175,9 @@ export function SystemAssistant() {
       ) : null}
       {open || pending ? (
         <AssistantSheet
-          key={pending ? `req${pending.seq}` : 'fab'}
+          key={pending ? `req${pending.seq}` : `fab-${fabMode}`}
           screen={onTabs ? screen : 'Profile'}
-          initialMode={pending?.mode ?? 'chat'}
+          initialMode={pending?.mode ?? fabMode}
           initialPrompt={pending?.prompt}
           mood={mood}
           onLaunch={() => setFlying(true)}
@@ -816,6 +831,7 @@ function AssistantSheet({
       else if (initialMode === 'interview') askAs('Get to know me. Ask me questions for my profile.', 'interview');
       else if (initialMode === 'board') askAs('Suggest quests from my profile.', 'board');
       else if (initialMode === 'live-interview') await startLive('interview');
+      else if (initialMode === 'live') await startLive('chat');
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);

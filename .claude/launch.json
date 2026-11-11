@@ -8,6 +8,12 @@
       "port": 8081
     },
     {
+      "name": "system-dist",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["node_modules/expo/bin/cli", "serve", "--port", "8090"],
+      "port": 8090
+    },
+    {
       "name": "system-go",
       "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
       "runtimeArgs": ["node_modules/expo/bin/cli", "start", "--go", "--lan", "--port", "8081"],

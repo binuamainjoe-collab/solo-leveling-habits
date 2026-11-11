@@ -181,6 +181,7 @@ export default function QuestBoardScreen() {
       flies={page === 'todo'}
       day={{ done: doneCount, total }}
       onChange={(next) => setProgress(quest.id, next)}
+      compact={!wide}
     />
   );
 
@@ -460,12 +461,15 @@ function BoardCard({
   flies,
   day,
   onChange,
+  compact,
 }: {
   quest: QuestDef;
   value: number;
   width: number;
   order: number;
   flies: boolean;
+  /** Phones: the shorter card, so the board scrolls less. */
+  compact: boolean;
   /** Today's count so far, for the ring the card flies into. */
   day: { done: number; total: number };
   onChange: (next: number) => void;
@@ -485,6 +489,7 @@ function BoardCard({
           quest={quest}
           value={value}
           ceiling={isCeilingQuest(quest)}
+          compact={compact}
           onChange={(next) => {
             if (flies && !isComplete(quest, value) && isComplete(quest, next)) clearInto(slot.current, day.done, day.total);
             onChange(next);

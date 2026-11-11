@@ -25,9 +25,45 @@ import { CHANGE_FIELDS, CORE, knowledge, nowBlock, OPS, str } from '../_shared/s
 /** Live calls per UTC day. A call is minutes of audio, so this is generous. */
 const LIVE_CAP = 30;
 
-/** The live model; a Supabase secret can move it without a code change. */
-const DEFAULT_LIVE_MODEL = 'gemini-3.8-live';
+/**
+ * The live models. Calls use Gemini's high-reasoning voice model, which
+ * thinks in the background and keeps talking ("checking that now") while it
+ * does, so the Player gets the smarter System without dead air. If the key
+ * cannot use it, the fast default takes over, so a call always opens. A
+ * Supabase secret, GEMINI_MODEL_LIVE, overrides both without a code change.
+ */
+const PREFERRED_LIVE_MODEL = 'gemini-3.8-live-extended-thinking';
+const FALLBACK_LIVE_MODEL = 'gemini-3.8-live';
 const MODEL_ID = /^[a-z0-9][a-z0-9.-]{2,63}$/;
+/** How hard the thinking model reasons. Higher is slower to answer out loud. */
+const THINKING_LEVEL = 'LOW';
+
+/** The thinking model takes a thinking level and only non-blocking tools. */
+function thinks(model: string): boolean {
+  return model.includes('extended-thinking');
+}
+
+/** Which model the key may use, checked once per warm instance for ten minutes. */
+let chosen: { model: string; until: number } | null = null;
+
+async function liveModel(key: string): Promise<string> {
+  const set = (Deno.env.get('GEMINI_MODEL_LIVE') ?? '').trim();
+  if (MODEL_ID.test(set)) return set;
+  if (chosen && chosen.until > Date.now()) return chosen.model;
+  let model = FALLBACK_LIVE_MODEL;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${PREFERRED_LIVE_MODEL}`, {
+      headers: { 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.ok) model = PREFERRED_LIVE_MODEL;
+    else console.warn('live: the thinking model is not available to this key', res.status, (await res.text()).slice(0, 200));
+  } catch (err) {
+    console.warn('live: could not check the thinking model, using the fast one', err);
+  }
+  chosen = { model, until: Date.now() + 10 * 60_000 };
+  return model;
+}
 
 /** A deep, even voice for The System. */
 const VOICE = 'Charon';
@@ -77,14 +113,14 @@ ${OPS}
 - Only what the Player says in THIS call counts as asking or agreeing. Never act on a request or an "ok" from the earlier conversation: if something from before still needs doing, mention it and ask.
 - Your opening turn never calls apply_changes.
 - Profile updates (set_profile) are the exception to asking first: when the Player tells you something lasting about their life, save it at once.
-- Never say you changed something unless apply_changes reported it as applied.`;
+- Never say you changed something unless apply_changes reported it as applied. While it is still working, a few words ("on it") are fine; the result comes back to you, and only then do you say what changed.`;
 
 /**
- * apply_changes blocks: what The System says next depends on the app's answer,
- * and the app can refuse. Without it the model could report a change as made
- * before knowing it was, which LIVE_RULES forbids. The app answers in moments,
- * so nobody is left waiting. The extended-thinking model takes NON_BLOCKING
- * only and errors on anything else, so GEMINI_MODEL_LIVE can still move there.
+ * On the fast model apply_changes blocks: what The System says next depends on
+ * the app's answer, and the app can refuse, so it waits for it. The thinking
+ * model takes NON_BLOCKING only and errors on anything else; it keeps talking
+ * while the app answers and reasons over the result when it arrives, and
+ * LIVE_RULES still forbids calling a change done before that.
  */
 function toolsFor(model: string) {
   return [
@@ -92,7 +128,7 @@ function toolsFor(model: string) {
       functionDeclarations: [
         {
           name: 'apply_changes',
-          behavior: model.includes('extended-thinking') ? 'NON_BLOCKING' : 'BLOCKING',
+          behavior: thinks(model) ? 'NON_BLOCKING' : 'BLOCKING',
           description:
             'Change the app: quest targets, the quest board, today\'s progress, the daily schedule, goals, the Player\'s profile. Call only when the Player asked for the change or agreed to it (profile updates excepted).',
           parameters: {
@@ -185,8 +221,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .filter(Boolean)
     .join('\n\n');
 
-  const set = (Deno.env.get('GEMINI_MODEL_LIVE') ?? '').trim();
-  const model = MODEL_ID.test(set) ? set : DEFAULT_LIVE_MODEL;
+  const model = await liveModel(key);
   const nowMs = Date.now();
 
   const runId = await startRun(db, 'assistant-live');
@@ -205,6 +240,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         generationConfig: {
           responseModalities: ['AUDIO'],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } },
+          ...(thinks(model) ? { thinkingConfig: { thinkingLevel: THINKING_LEVEL } } : {}),
         },
         systemInstruction: { parts: [{ text: system }] },
         tools: toolsFor(model),

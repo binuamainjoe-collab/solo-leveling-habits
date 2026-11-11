@@ -35,6 +35,12 @@ interface Props {
   onChange: (next: number) => void;
   /** Ceiling quests (stay UNDER the target) invert the completion logic. */
   ceiling?: boolean;
+  /**
+   * Phones: the same card without the empty band that frames the artwork,
+   * so a row of quests is about a third shorter and the board needs less
+   * scrolling. The art still fills the card; every control stays full size.
+   */
+  compact?: boolean;
 }
 
 /** How much one press of `+` is worth, per quest kind. */
@@ -50,7 +56,7 @@ function stepFor(quest: QuestDef): number {
   }
 }
 
-function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
+function QuestCardBase({ quest, value, onChange, ceiling = false, compact = false }: Props) {
   const cat = categoryMeta[quest.category];
 
   const ratio = quest.target > 0 ? Math.min(1, value / quest.target) : 0;
@@ -132,13 +138,13 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
         </View>
       </View>
 
-      <View style={styles.spacer} />
+      <View style={compact ? styles.spacerCompact : styles.spacer} />
 
       <SystemText
         variant="title"
         color={done ? palette.positive : palette.text}
         numberOfLines={2}
-        style={styles.title}>
+        style={compact ? styles.titleCompact : styles.title}>
         {quest.title}
       </SystemText>
 
@@ -249,8 +255,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false }: Props) {
     <Card
       art={artFor(quest.id, quest.category)}
       scrim={0.78}
-      style={styles.card}
-      contentStyle={styles.inner}>
+      style={compact ? styles.cardCompact : styles.card}
+      contentStyle={compact ? styles.innerCompact : styles.inner}>
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { backgroundColor: alpha(palette.positive, 0.16) }, burstStyle]}
@@ -441,7 +447,9 @@ function fmt(n: number): string {
 
 const styles = StyleSheet.create({
   card: { minHeight: 178 },
+  cardCompact: { minHeight: 0 },
   inner: { padding: space.md, paddingBottom: space.md + 3 },
+  innerCompact: { padding: space.sm + 2, paddingBottom: space.sm + 5 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
   chip: {
     borderWidth: 1,
@@ -466,7 +474,9 @@ const styles = StyleSheet.create({
   gateText: { fontSize: 11 },
   // Pushes the title to the lower half so the artwork reads above it.
   spacer: { height: 44 },
+  spacerCompact: { height: space.sm },
   title: { fontSize: 17, lineHeight: 22 },
+  titleCompact: { fontSize: 15, lineHeight: 19 },
   count: { marginTop: 2 },
   footer: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   stepWrap: { flex: 1 },

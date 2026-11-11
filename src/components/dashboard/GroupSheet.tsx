@@ -60,6 +60,8 @@ export function GroupSheet({
             value={state.values[q.id] ?? 0}
             ceiling={isCeilingQuest(q)}
             onChange={(next) => setProgress(q.id, next)}
+            // Two to a row on a phone: the shorter card, so the sheet scrolls less.
+            compact={columns === 2}
           />
         </Animated.View>
       ))}
