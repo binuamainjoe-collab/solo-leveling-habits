@@ -277,7 +277,7 @@ export async function signInWithGoogle(): Promise<AuthResult> {
     if (!session) return { ok: false, error: 'Signed in, but no session came back. Try again.' };
 
     const account = await rememberAccount(session);
-    await linkGoogleTokens(session);
+    await linkGoogleOnce(session);
     return account ? { ok: true, account } : { ok: false, error: 'That account had no profile attached.' };
   } catch (err) {
     return {
@@ -299,15 +299,15 @@ export async function signInWithGoogle(): Promise<AuthResult> {
  * Failing here is not fatal — sign-in still worked, the student just has no
  * Calendar access until next time.
  */
-export async function linkGoogleTokens(session: Session): Promise<void> {
+export async function linkGoogleTokens(session: Session): Promise<boolean> {
   const refresh = session.provider_refresh_token;
-  if (!refresh || !client) return;
+  if (!refresh || !client) return false;
 
   const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-  if (!url) return;
+  if (!url) return false;
 
   try {
-    await fetch(`${url}/functions/v1/google-link`, {
+    const res = await fetch(`${url}/functions/v1/google-link`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -315,9 +315,34 @@ export async function linkGoogleTokens(session: Session): Promise<void> {
       },
       body: JSON.stringify({ refresh_token: refresh, scopes: GOOGLE_SCOPES.split(' ') }),
     });
+    if (!res.ok) console.warn('[auth] the server did not store the Google connection', res.status);
+    return res.ok;
   } catch (err) {
     console.warn('[auth] could not store Google tokens', err);
+    return false;
   }
+}
+
+/** Refresh tokens already handed over in this page load, so each goes once. */
+const linked = new Set<string>();
+
+/**
+ * Hand Google's refresh token to the server the first time a session that
+ * carries one shows up.
+ *
+ * On the web the sign-in navigates away, so signInWithGoogle never reaches
+ * its own link step: the session comes back through the redirect instead,
+ * and only that first session holds `provider_refresh_token` (a refreshed
+ * session does not). The auth listener calls this for every session it
+ * sees, so the token is caught whichever event delivers it.
+ */
+export async function linkGoogleOnce(session: Session | null): Promise<boolean> {
+  const refresh = session?.provider_refresh_token;
+  if (!session || !refresh || linked.has(refresh)) return false;
+  linked.add(refresh);
+  const ok = await linkGoogleTokens(session);
+  if (!ok) linked.delete(refresh);
+  return ok;
 }
 
 /* --------------------------------------------------------- switching, out */

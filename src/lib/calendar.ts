@@ -28,6 +28,11 @@ interface Entry {
 
 const cache = new Map<string, Entry>();
 
+/** Forget every cached day: Google was just connected, so empty reads were wrong. */
+export function clearCalendar(): void {
+  cache.clear();
+}
+
 export function calendarFor(day: string): Promise<string[]> {
   const now = Date.now();
   const hit = cache.get(day);

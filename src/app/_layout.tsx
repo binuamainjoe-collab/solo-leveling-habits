@@ -30,7 +30,8 @@ import { SystemText } from '@/components/system/SystemText';
 import { storage } from '@/store/storage';
 import { fromOnboarding } from '@/data/lifeProfile';
 import { saveProfileFields } from '@/lib/profile';
-import { rememberAccount, setSignInSkipped, useSignInSkipped } from '@/lib/auth';
+import { linkGoogleOnce, rememberAccount, setSignInSkipped, useSignInSkipped } from '@/lib/auth';
+import { clearCalendar } from '@/lib/calendar';
 import { bindAuthToAppState, client, supabaseConfigured } from '@/lib/supabase';
 import { initFeedback, setHapticsEnabled, setSoundEnabled } from '@/lib/feedback';
 import { initMusic, resumeMusic, setMusicEnabled, suspendMusic } from '@/lib/music';
@@ -204,6 +205,13 @@ function AuthBridge() {
       // Signing in answers the launch question for good; signing out later
       // should ask it again rather than inherit an old "not now".
       if (session && event === 'SIGNED_IN') void setSignInSkipped(false);
+      // Back from Google on the web: the first session carries Google's
+      // refresh token, so Calendar and Tasks get connected now or never.
+      if (session?.provider_refresh_token) {
+        void linkGoogleOnce(session).then((ok) => {
+          if (ok) clearCalendar();
+        });
+      }
     });
 
     return () => data.subscription.unsubscribe();

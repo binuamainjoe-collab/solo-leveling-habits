@@ -15,10 +15,15 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
 
+/**
+ * The app calls this through `supabase.functions.invoke`, which also sends
+ * `apikey` and `x-client-info`: a browser refuses the call unless the
+ * preflight allows every header it is about to send.
+ */
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, authorization',
+  'Access-Control-Allow-Headers': 'content-type, authorization, apikey, x-client-info',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -117,8 +122,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     global: { headers: { Authorization: authHeader } },
     auth: { persistSession: false },
   });
-  const { data: userData, error: userError } = await asUser.auth.getUser();
+  // The token is passed in so the check never depends on a stored session.
+  const { data: userData, error: userError } = await asUser.auth.getUser(authHeader.slice(7));
   if (userError || !userData.user) return json({ error: 'Not allowed.' }, 401);
+  // Without these the refresh token cannot be turned into an access token.
+  // Said plainly, rather than as an expired connection the Player cannot fix.
+  if (!Deno.env.get('GOOGLE_CLIENT_ID') || !Deno.env.get('GOOGLE_CLIENT_SECRET')) {
+    console.error('google: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not set on this project');
+    return json({ error: 'Calendar and Tasks are not set up on the server yet.' }, 503);
+  }
 
   let op = '';
   let args: Record<string, unknown> = {};
