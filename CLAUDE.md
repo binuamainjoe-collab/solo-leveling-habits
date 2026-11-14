@@ -1,1 +1,2 @@
 @AGENTS.md
+@COUNCIL_OF_AGENTS.md
