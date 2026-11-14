@@ -307,7 +307,14 @@ export default function QuestBoardScreen() {
         {/* Keyed by page, so switching mounts a fresh page with its entrance. */}
         <Animated.View key={page} entering={pageEnter} collapsable={false}>
           {page === 'todo' ? (
-            todo.length > 0 ? (
+            todo.length > 0 && !wide ? (
+              // A phone: one grid, two to a row, still in category order. A
+              // heading and a half-empty row per category made the board
+              // three times as tall; every card already names its category.
+              <View style={[styles.grid, { gap }]}>
+                {groups.flatMap(([, quests]) => quests).map((q, i) => renderCard(q, i))}
+              </View>
+            ) : todo.length > 0 ? (
               groups.map(([categoryId, quests], groupIndex) => {
                 const cat = categoryMeta[categoryId];
                 return (

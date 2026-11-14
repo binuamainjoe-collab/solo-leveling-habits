@@ -20,7 +20,8 @@
  */
 
 import { caller, fail, finishRun, json, preflight, startRun } from '../_shared/agent.ts';
-import { CHANGE_FIELDS, CORE, knowledge, nowBlock, OPS, str } from '../_shared/system.ts';
+import { chosenModel, MODEL_CHOICES } from '../_shared/models.ts';
+import { CHANGE_FIELDS, CORE, knowledge, nowBlock, OPS, settingsOf, str } from '../_shared/system.ts';
 
 /** Live calls per UTC day. A call is minutes of audio, so this is generous. */
 const LIVE_CAP = 30;
@@ -46,7 +47,10 @@ function thinks(model: string): boolean {
 /** Which model the key may use, checked once per warm instance for ten minutes. */
 let chosen: { model: string; until: number } | null = null;
 
-async function liveModel(key: string): Promise<string> {
+async function liveModel(key: string, picks: Record<string, unknown>): Promise<string> {
+  // The Player picked a voice in the app: that one, as long as it is on the list.
+  const picked = picks.live;
+  if (typeof picked === 'string' && MODEL_CHOICES.live.options.includes(picked)) return chosenModel('live', picks);
   const set = (Deno.env.get('GEMINI_MODEL_LIVE') ?? '').trim();
   if (MODEL_ID.test(set)) return set;
   if (chosen && chosen.until > Date.now()) return chosen.model;
@@ -113,7 +117,11 @@ ${OPS}
 - Only what the Player says in THIS call counts as asking or agreeing. Never act on a request or an "ok" from the earlier conversation: if something from before still needs doing, mention it and ask.
 - Your opening turn never calls apply_changes.
 - Profile updates (set_profile) are the exception to asking first: when the Player tells you something lasting about their life, save it at once.
-- Never say you changed something unless apply_changes reported it as applied. While it is still working, a few words ("on it") are fine; the result comes back to you, and only then do you say what changed.`;
+- Never say you changed something unless apply_changes reported it as applied. While it is still working, a few words ("on it") are fine; the result comes back to you, and only then do you say what changed.
+
+YOUR MEMORY — CONTEXT holds what you know about the Player, but not everything: the full text of their uploaded files and older conversations sit in your long-term memory. When the Player asks about something from their files or from before, or you need a detail CONTEXT does not have (a date, a name, what a document says), call recall with a short question. Say a few words while it looks ("let me check"); the answer comes back to you. Never make up what a file says.
+
+THE PLAYER'S SCREEN AND CAMERA — the Player can keep using the app while you talk; the call stays open on top of it. If they turn on their camera or share their screen, you see it as a stream of pictures. Use what you see only when it helps with what they are asking, and say so briefly ("I can see your notes").`;
 
 /**
  * On the fast model apply_changes blocks: what The System says next depends on
@@ -126,6 +134,17 @@ function toolsFor(model: string) {
   return [
     {
       functionDeclarations: [
+        {
+          name: 'recall',
+          behavior: thinks(model) ? 'NON_BLOCKING' : 'BLOCKING',
+          description:
+            "Look something up in your long-term memory of the Player: their uploaded files read in full, older conversations and everything you have learned about them. Ask a short, specific question; you get a short spoken answer.",
+          parameters: {
+            type: 'object',
+            properties: { question: { type: 'string', description: 'What you need to know, in a few words.' } },
+            required: ['question'],
+          },
+        },
         {
           name: 'apply_changes',
           behavior: thinks(model) ? 'NON_BLOCKING' : 'BLOCKING',
@@ -202,7 +221,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const now = nowBlock(body.now);
-  const known = await knowledge(db, now.today, HISTORY_FOR_CALL);
+  const [known, settings] = await Promise.all([knowledge(db, now.today, HISTORY_FOR_CALL), settingsOf(db)]);
   const transcript = known.history.length
     ? known.history.map((m) => `${m.role === 'user' ? 'Player' : 'System'}: ${m.text}`).join('\n')
     : '(nothing yet)';
@@ -221,7 +240,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .filter(Boolean)
     .join('\n\n');
 
-  const model = await liveModel(key);
+  const model = await liveModel(key, settings.models);
   const nowMs = Date.now();
 
   const runId = await startRun(db, 'assistant-live');

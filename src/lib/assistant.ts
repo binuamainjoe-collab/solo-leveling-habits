@@ -144,3 +144,43 @@ export async function logLiveCall(turns: { role: 'user' | 'model'; text: string 
   if (turns.length === 0) return;
   await callSystem({ op: 'log', turns }, 'live');
 }
+
+/** What a learning pass kept: new memories, and profile fields it filled or updated. */
+export interface Learned {
+  memories: { kind: string; content: string }[];
+  fields: { section: string; field: string; value: string }[];
+}
+
+/**
+ * Have Beerus go over the conversation since his last pass (typed, spoken
+ * and live alike) and keep what it says about the Player. Run after a live
+ * call is stored, and when the chat window closes after new messages. Best
+ * effort: a failure only means the next pass reads more.
+ */
+export async function learnFromConversation(date: string): Promise<Learned | null> {
+  const res = await callSystem<{ learned?: unknown; profile?: unknown }>({ op: 'learn', now: { date } }, 'assistant', 60_000);
+  if (!res.ok || !res.data) return null;
+  const memories = Array.isArray(res.data.learned)
+    ? (res.data.learned as { kind?: unknown; content?: unknown }[])
+        .filter((m) => typeof m?.content === 'string')
+        .map((m) => ({ kind: String(m.kind ?? 'fact'), content: String(m.content) }))
+    : [];
+  const fields = Array.isArray(res.data.profile)
+    ? (res.data.profile as Record<string, unknown>[])
+        .filter((f) => typeof f?.section === 'string' && typeof f?.field === 'string' && typeof f?.value === 'string')
+        .map((f) => ({ section: f.section as string, field: f.field as string, value: f.value as string }))
+    : [];
+  return { memories, fields };
+}
+
+/**
+ * The live call's recall tool: ask Beerus's own model a question about the
+ * Player, answered from everything he knows, his files read whole.
+ */
+export async function recallAbout(question: string, date: string): Promise<string> {
+  const res = await callSystem<{ answer?: unknown }>({ op: 'recall', question, now: { date } }, 'assistant', 30_000);
+  if (!res.ok || !res.data || typeof res.data.answer !== 'string') {
+    return res.error ? `Recall failed: ${res.error}` : 'Recall found nothing.';
+  }
+  return res.data.answer;
+}

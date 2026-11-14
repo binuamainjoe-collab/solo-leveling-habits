@@ -14,6 +14,7 @@ import { RankHero } from '@/components/status/RankFire';
 import { StatusRail, useChapters, type Chapter } from '@/components/status/StatusRail';
 import { Panel, RangeSwitch } from '@/components/system/Panel';
 import { Screen, useContentWidth } from '@/components/system/Screen';
+import { ModelPicker } from '@/components/system/ModelPicker';
 import { MonthCalendar } from '@/components/system/MonthCalendar';
 import { StatusHeader } from '@/components/system/StatusHeader';
 import { SystemText } from '@/components/system/SystemText';
@@ -346,6 +347,13 @@ export default function HunterScreen() {
                 router.push('/profile');
               }}
             />
+          </Card>
+
+          <SystemText variant="label" style={styles.sectionLabel}>
+            Models
+          </SystemText>
+          <Card reveal style={styles.block}>
+            <ModelPicker />
           </Card>
 
           <SystemText variant="label" style={styles.sectionLabel}>

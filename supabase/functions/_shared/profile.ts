@@ -110,7 +110,7 @@ export async function loadProfile(db: SupabaseClient, date: string): Promise<Pro
     db.from('life_profile').select('data').maybeSingle(),
     db
       .from('profile_documents')
-      .select('name, kind, summary, weekly, dates')
+      .select('name, kind, summary, weekly, dates, notes')
       .is('archived_at', null)
       .order('created_at', { ascending: false })
       .limit(12),
@@ -154,9 +154,118 @@ export async function loadProfile(db: SupabaseClient, date: string): Promise<Pro
       : '',
     timetable.length ? `TIMETABLE for this day (fixed, from their documents):\n${timetable.map((t) => `  ${t}`).join('\n')}` : '',
     upcoming.length ? `Upcoming dates from their documents:\n${upcoming.map((t) => `  ${t}`).join('\n')}` : '',
+    notesBlock(docs),
   ]
     .filter(Boolean)
     .join('\n');
 
   return { data, text, timetable, empty };
+}
+
+/* ------------------------------------------------------- the file library */
+
+/**
+ * What the Player can teach Beerus with, by the type the browser reports:
+ * documents and photos, plain text, and voice memos. These are the inputs
+ * Gemini 4 Hydrogen reads (text, image, audio, PDF). A Word or Pages file
+ * is not among them: save it as a PDF first.
+ */
+export const LIBRARY_TYPES: Record<string, string> = {
+  'application/pdf': 'application/pdf',
+  'image/jpeg': 'image/jpeg',
+  'image/png': 'image/png',
+  'image/webp': 'image/webp',
+  'image/heic': 'image/heic',
+  'image/heif': 'image/heif',
+  'text/plain': 'text/plain',
+  'text/markdown': 'text/md',
+  'text/x-markdown': 'text/md',
+  'text/csv': 'text/csv',
+  'text/html': 'text/html',
+  'application/json': 'text/plain',
+  'audio/mpeg': 'audio/mp3',
+  'audio/mp3': 'audio/mp3',
+  'audio/mp4': 'audio/mp4',
+  'audio/m4a': 'audio/m4a',
+  'audio/x-m4a': 'audio/m4a',
+  'audio/aac': 'audio/aac',
+  'audio/wav': 'audio/wav',
+  'audio/x-wav': 'audio/wav',
+  'audio/webm': 'audio/webm',
+  'audio/ogg': 'audio/ogg',
+};
+
+/** The type to hand Gemini for a file, or null when it cannot read it. */
+export function libraryType(reported: string): string | null {
+  return LIBRARY_TYPES[reported.split(';')[0].trim().toLowerCase()] ?? null;
+}
+
+/** The largest file the library takes (the storage bucket's limit too). */
+export const MAX_LIBRARY_BYTES = 20 * 1024 * 1024;
+
+/** Bytes to base64 without blowing the call stack on a big file. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/**
+ * The Player's original files, newest first, inline for one model call,
+ * until `maxBytes` is reached: a request to Gemini must stay under 20 MB
+ * with the prompt. Read through the caller's own client, so the storage
+ * rules hand back only their files.
+ */
+export async function loadLibrary(
+  db: SupabaseClient,
+  maxBytes: number,
+): Promise<{ files: { mimeType: string; data: string }[]; names: string[] }> {
+  const { data: docs } = await db
+    .from('profile_documents')
+    .select('name, storage_path, mime_type, size_bytes')
+    .is('archived_at', null)
+    .not('storage_path', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  const files: { mimeType: string; data: string }[] = [];
+  const names: string[] = [];
+  let used = 0;
+  for (const d of docs ?? []) {
+    const type = libraryType(String(d.mime_type ?? ''));
+    const size = Number(d.size_bytes ?? 0);
+    if (!type || !d.storage_path || used + size > maxBytes) continue;
+    const { data: blob, error } = await db.storage.from('knowledge').download(String(d.storage_path));
+    if (error || !blob) {
+      console.warn('library file unreadable', error?.message);
+      continue;
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (used + bytes.length > maxBytes) continue;
+    used += bytes.length;
+    files.push({ mimeType: type, data: bytesToBase64(bytes) });
+    names.push(String(d.name ?? 'file').slice(0, 60));
+  }
+  return { files, names };
+}
+
+/**
+ * How much of Beerus's notes on the Player's files goes into every prompt,
+ * newest file first. Hydrogen's window is far bigger; this keeps each
+ * message cheap. Anything past it is still in the files, which recall reads
+ * whole when a question needs them.
+ */
+export const NOTES_IN_PROMPT = 24_000;
+
+/** What the Player's files say about them, in Beerus's words, within NOTES_IN_PROMPT. */
+function notesBlock(docs: { name?: unknown; notes?: unknown }[]): string {
+  let left = NOTES_IN_PROMPT;
+  const parts: string[] = [];
+  for (const d of docs) {
+    const notes = typeof d.notes === 'string' ? d.notes.trim() : '';
+    if (!notes || left <= 200) continue;
+    const piece = notes.slice(0, left);
+    left -= piece.length;
+    parts.push(`From "${String(d.name).slice(0, 60)}":\n${piece}`);
+  }
+  return parts.length ? `WHAT THEIR FILES SAY (your notes from reading them):\n${parts.join('\n\n')}` : '';
 }

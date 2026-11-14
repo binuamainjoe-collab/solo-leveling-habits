@@ -52,6 +52,64 @@ const SECRET: Record<Tier, string> = {
 /** A model id is lowercase letters, digits, dots and dashes — nothing that could bend the URL. */
 const MODEL_ID = /^[a-z0-9][a-z0-9.-]{2,63}$/;
 
+/* ------------------------------------------------- the Player's own picks */
+
+/**
+ * The parts of the System whose model the Player picks in the app (Status →
+ * Models), and the models each may run on. Whatever the app sends, only an
+ * id on its role's list is ever used; anything else means the default.
+ *
+ *   beerus  — typed and spoken chat, his memory (the learning pass after a
+ *             conversation, recall during a call) and reading uploaded
+ *             files. Gemini 4 Hydrogen by default, and strictly the one
+ *             picked: no quiet switch to another model when it fails.
+ *   live    — the real-time voice in a live call. Hydrogen has no Live API
+ *             (ai.google.dev model page, 13 Nov 2026), so these are the
+ *             Gemini 3.8 Live models; the call asks Beerus's model whenever
+ *             it needs his memory or files (the recall tool).
+ *   planner — the planner chat and tomorrow's plan.
+ *
+ * Ids checked against the Gemini model list on 13 Nov 2026. The same list
+ * is in the app (src/data/models.ts); scratch/models-check.ts fails if the
+ * two drift apart.
+ */
+export type Role = 'beerus' | 'live' | 'planner';
+
+export const MODEL_CHOICES: Record<Role, { default: string; options: string[] }> = {
+  beerus: {
+    default: 'gemini-4-hydrogen',
+    options: ['gemini-4-hydrogen', 'gemini-4-argon', 'gemini-4-carbon', 'gemini-3.8-flash'],
+  },
+  live: {
+    default: 'gemini-3.8-live-extended-thinking',
+    options: ['gemini-3.8-live-extended-thinking', 'gemini-3.8-live'],
+  },
+  planner: {
+    default: 'gemini-4-argon',
+    options: ['gemini-4-argon', 'gemini-4-hydrogen', 'gemini-4-carbon', 'gemini-3.8-flash'],
+  },
+};
+
+/** The model a role runs on, from the Player's saved picks (a user_settings.models value). */
+export function chosenModel(role: Role, picks: unknown): string {
+  const choice = MODEL_CHOICES[role];
+  const raw = picks && typeof picks === 'object' ? (picks as Record<string, unknown>)[role] : undefined;
+  return typeof raw === 'string' && choice.options.includes(raw) ? raw : choice.default;
+}
+
+/**
+ * The models a role's call tries, in order. Beerus is strict: only the
+ * model picked, so a failure is said out loud rather than answered by a
+ * model the Player did not choose. The planner keeps Flash behind its pick,
+ * as before.
+ */
+export function modelsForRole(role: 'beerus' | 'planner', picks: unknown, env: (name: string) => string | undefined): string[] {
+  const model = chosenModel(role, picks);
+  if (role === 'beerus') return [model];
+  const fast = modelsFor('fast', env)[0];
+  return model === fast || isBenched(model) ? [fast] : [model, fast];
+}
+
 /**
  * The models to try for a tier, in order. Every tier ends on fast, and a
  * model that is benched (see below) is skipped while its bench lasts. The

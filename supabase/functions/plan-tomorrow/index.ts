@@ -27,7 +27,7 @@ import {
   DEEP_TIMEOUT_MS,
   type Failure,
   geminiUrl,
-  modelsFor,
+  modelsForRole,
   runModel,
   worthBenching,
   worthFallingBack,
@@ -317,6 +317,22 @@ async function signedIn(req: Request): Promise<{ token: string } | Response> {
   return { token };
 }
 
+/**
+ * The model picks the Player saved in the app (Status, Models), read as
+ * them. Best effort: no row, or no table yet, means the defaults.
+ */
+async function savedPicks(token: string): Promise<unknown> {
+  const url = Deno.env.get('SUPABASE_URL') ?? '';
+  const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const db = createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data, error } = await db.from('user_settings').select('models').maybeSingle();
+  if (error) console.warn('planner: settings unreadable, using the default model', error.message);
+  return data?.models ?? {};
+}
+
 /* ------------------------------------------------------------ knowledge */
 
 /**
@@ -491,10 +507,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     },
   });
 
-  // The deep model first; Flash if it is missing, refused, busy or slow.
-  // The fallback is a second billed request, so it claims a second place in
+  // The planner model the Player picked (gemini-4-argon unless they chose
+  // another) first; Flash if it is missing, refused, busy or slow. The
+  // fallback is a second billed request, so it claims a second place in
   // today's budget before it is sent.
-  const models = modelsFor('deep', (name) => Deno.env.get(name));
+  const models = modelsForRole('planner', await savedPicks(who.token), (name) => Deno.env.get(name));
   const startedAt = Date.now();
   const attempts: Attempt[] = [];
   let res: Response | null = null;

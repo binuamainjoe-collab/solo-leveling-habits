@@ -150,7 +150,20 @@ export interface Knowledge {
   profileEmpty: string[];
 }
 
-const MAX_MEMORIES_IN = 40;
+const MAX_MEMORIES_IN = 80;
+
+/**
+ * The Player's saved settings: their model picks (see MODEL_CHOICES in
+ * models.ts) and how far the learning pass has read the conversation. An
+ * account with no row, or a project without the table yet, gets the
+ * defaults.
+ */
+export async function settingsOf(db: SupabaseClient): Promise<{ models: Record<string, unknown>; learnedUntil: string | null }> {
+  const { data, error } = await db.from('user_settings').select('models, learned_until').maybeSingle();
+  if (error) console.warn('settings unreadable, using defaults', error.message);
+  const models = data?.models && typeof data.models === 'object' ? (data.models as Record<string, unknown>) : {};
+  return { models, learnedUntil: typeof data?.learned_until === 'string' ? data.learned_until : null };
+}
 
 /**
  * Everything the System knows about one account, gathered in one pass.

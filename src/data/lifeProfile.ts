@@ -231,6 +231,10 @@ export interface ProfileDocument {
   summary: string;
   weekly: WeeklyBlock[];
   dates: { date: string; title: string }[];
+  /** Beerus's notes on what the file says about the Player; part of every prompt. */
+  notes: string;
+  /** The original is kept in private storage, so recall can read it whole. */
+  kept: boolean;
   createdAt: string;
 }
 
@@ -244,6 +248,15 @@ export const DAY_LABEL: Record<WeeklyBlock['day'], string> = {
   sun: 'Sun',
 };
 
-/** What can be uploaded, and how big. Gemini reads PDFs and photos directly. */
-export const DOCUMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-export const MAX_DOCUMENT_BYTES = 4_000_000;
+/**
+ * What can be given to Beerus to learn from, and how big: documents and
+ * photos, plain text, and voice memos, the inputs Gemini 4 Hydrogen reads.
+ * The server checks the type again (LIBRARY_TYPES in
+ * supabase/functions/_shared/profile.ts). A Word file is not among them:
+ * save it as a PDF.
+ */
+export const DOCUMENT_TYPES = ['application/pdf', 'image/*', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'audio/*'];
+/** Kept in storage: the bucket's own limit. */
+export const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+/** Without storage (no sign-in, or an upload that failed), a file goes inline and must be small. */
+export const MAX_INLINE_BYTES = 4_000_000;

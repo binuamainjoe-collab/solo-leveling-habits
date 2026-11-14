@@ -217,6 +217,8 @@ export interface GeminiCall {
   audio?: { mimeType: string; data: string };
   /** A document or photo for the model to read (a PDF, a timetable photo). Base64, inline. */
   file?: { mimeType: string; data: string };
+  /** More files, after `file`: the Player's uploaded library, for recall. Base64, inline. */
+  files?: { mimeType: string; data: string }[];
   /**
    * How much reasoning to allow.
    *
@@ -231,6 +233,12 @@ export interface GeminiCall {
    * for 'fast'.
    */
   tier?: Tier;
+  /**
+   * The exact models to try, in order, in place of the tier's. For a role
+   * the Player picked in the app (modelsForRole in models.ts): Beerus is
+   * asked on his model alone.
+   */
+  models?: string[];
   /** How long a deep attempt may run before Flash is asked instead. */
   deepTimeoutMs?: number;
   /**
@@ -317,6 +325,7 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
           { text: call.prompt },
           ...(call.audio ? [{ inlineData: { mimeType: call.audio.mimeType, data: call.audio.data } }] : []),
           ...(call.file ? [{ inlineData: { mimeType: call.file.mimeType, data: call.file.data } }] : []),
+          ...(call.files ?? []).map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.data } })),
         ],
       },
     ],
@@ -335,7 +344,7 @@ export async function gemini(call: GeminiCall): Promise<GeminiResult> {
 
   // Deep first, Flash behind it. Only a failure Flash might not share moves
   // on; anything the model actually answered is the answer.
-  const models = modelsFor(call.tier ?? 'deep', (name) => Deno.env.get(name));
+  const models = call.models?.length ? call.models : modelsFor(call.tier ?? 'deep', (name) => Deno.env.get(name));
   const startedAt = Date.now();
   const budgetMs = call.budgetMs ?? BACKGROUND_BUDGET_MS;
   const attempts: Attempt[] = [];

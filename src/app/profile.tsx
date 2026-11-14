@@ -194,8 +194,8 @@ export default function ProfileScreen() {
           />
           <ActionRow
             iconName="external"
-            label={reading ? 'Reading…' : 'Add a timetable or document'}
-            hint="A PDF or a photo: class timetable, exam dates, work rota."
+            label={reading ? 'Beerus is reading…' : 'Teach Beerus with a file'}
+            hint="A PDF, photo, text file or voice memo, up to 20 MB: a timetable, your CV, notes, a journal. He reads it into notes he keeps."
             onPress={() => void addDocument()}
             busy={reading}
           />
@@ -249,7 +249,7 @@ export default function ProfileScreen() {
         {documents.length > 0 ? (
           <>
             <SystemText variant="label" style={styles.sectionLabel}>
-              Documents
+              What Beerus has read
             </SystemText>
             <Card style={styles.block} contentStyle={styles.list}>
               {documents.map((doc, i) => (
@@ -266,6 +266,16 @@ export default function ProfileScreen() {
                     {doc.weekly.length ? (
                       <SystemText variant="meta" color={palette.textFaint} numberOfLines={2}>
                         {weekSummary(doc)}
+                      </SystemText>
+                    ) : null}
+                    {doc.notes ? (
+                      <SystemText variant="meta" color={palette.textFaint} numberOfLines={3}>
+                        {doc.notes.replace(/\s+/g, ' ')}
+                      </SystemText>
+                    ) : null}
+                    {doc.kept ? (
+                      <SystemText variant="meta" color={palette.textFaint}>
+                        Kept, so he can look things up in it during a call.
                       </SystemText>
                     ) : null}
                   </View>

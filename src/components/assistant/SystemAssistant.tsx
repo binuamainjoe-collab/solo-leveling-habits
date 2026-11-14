@@ -45,8 +45,24 @@ import { vetChanges, type VettedChange } from '@/data/questEdits';
 import { QUESTS, QUESTS_BY_ID } from '@/data/quests';
 import { addDays } from '@/data/timeline';
 import { addText, attachChanges, closeTurns, toLog, type LiveTurn } from '@/data/live';
-import { assistantConfigured, loadHistory, logLiveCall, openLiveCall, sendToSystem } from '@/lib/assistant';
-import { liveSupported, startLiveCall, type LiveCall, type LiveState, type ToolCall } from '@/lib/live';
+import {
+  assistantConfigured,
+  learnFromConversation,
+  loadHistory,
+  logLiveCall,
+  openLiveCall,
+  recallAbout,
+  sendToSystem,
+} from '@/lib/assistant';
+import {
+  liveSupported,
+  screenShareSupported,
+  startLiveCall,
+  type LiveCall,
+  type LiveState,
+  type ToolCall,
+  type VideoKind,
+} from '@/lib/live';
 import { useAssistantRequest, type AssistantMode } from '@/lib/assistantBus';
 import { fetchLifeProfile, pickAndImportDocument, saveProfileFields } from '@/lib/profile';
 import type { LifeProfile } from '@/data/lifeProfile';
@@ -102,11 +118,13 @@ export function SystemAssistant() {
   const lowPower = state.settings?.lowPower ?? false;
   // True from the moment the window's Beerus sets off until he is home again.
   const [flying, setFlying] = useState(false);
+  // A live call is on: Beerus stays, whatever screen the Player opens.
+  const [inCall, setInCall] = useState(false);
   const shown = DEMO_STATES[demo];
   const mood = shown === 'proud' || shown === 'angry' ? shown : dayMood;
 
   const onTabs = segments[0] === '(tabs)';
-  if (!ready || !onboarded || (!onTabs && !pending)) return null;
+  if (!ready || !onboarded || (!onTabs && !pending && !inCall)) return null;
 
   const screen = SCREEN_NAME[segments[1] ?? 'index'] ?? 'Quests';
   // Only where a live call can run: a browser with a microphone and sound.
@@ -118,6 +136,7 @@ export function SystemAssistant() {
   const close = () => {
     setOpen(false);
     setFlying(false);
+    setInCall(false);
     setFabMode('chat');
     if (request) setSeenSeq(request.seq);
   };
@@ -182,6 +201,7 @@ export function SystemAssistant() {
           mood={mood}
           onLaunch={() => setFlying(true)}
           onClosed={close}
+          onCall={setInCall}
         />
       ) : null}
     </>
@@ -230,6 +250,7 @@ function AssistantSheet({
   mood,
   onLaunch,
   onClosed,
+  onCall,
 }: {
   screen: string;
   initialMode: AssistantMode;
@@ -239,6 +260,8 @@ function AssistantSheet({
   /** Beerus has left the floating button to fly up to the window. */
   onLaunch: () => void;
   onClosed: () => void;
+  /** Whether a live call is on, so the window is kept while it is. */
+  onCall: (on: boolean) => void;
 }) {
   const { state, setQuestOverride, toggleActive, setProgress, setSetting } = useProgress();
   const board = useActiveQuests();
@@ -279,7 +302,18 @@ function AssistantSheet({
   // up (the CSS in src/app/+html.tsx), so it starts in place; once it has gone,
   // he flies home, and only then is the window let go.
   const [leaving, setLeaving] = useState(false);
-  const { close: onClose, pan: dragClosed, sheetStyle } = useDragSheet(screenHeight, () => setLeaving(true), true);
+  // During a live call the window can shrink to a bar over the app (like
+  // Gemini Live), so the Player keeps using everything while they talk.
+  // Held for five seconds on the floating Beerus, the call starts there.
+  const [docked, setDocked] = useState(initialMode === 'live');
+  const dockedRef = useRef(docked);
+  const liveOnRef = useRef(false);
+  // Closing the window mid-call docks it; the call only ends from End.
+  const { close: onClose, open: reopenSheet, pan: dragClosed, sheetStyle } = useDragSheet(
+    screenHeight,
+    () => (liveOnRef.current ? setDocked(true) : setLeaving(true)),
+    true,
+  );
   const wide = width >= WIDE;
 
   // Push-to-talk: tap the mic, speak, tap send. Replies to spoken messages
@@ -301,6 +335,13 @@ function AssistantSheet({
   const [liveState, setLiveState] = useState<LiveState | 'off'>('off');
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const callRef = useRef<LiveCall | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [video, setVideo] = useState<{ kind: VideoKind; stream: MediaStream } | null>(null);
+  // The back camera first, like pointing a phone at something to ask about it.
+  const [facing, setFacing] = useState<'user' | 'environment'>('environment');
+  /** A short line on the bar: a camera that was refused, a memory being checked. */
+  const [liveNote, setLiveNote] = useState<string | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Undo steps for changes made in a call, by the id stored on the turn. */
   const liveUndoers = useRef<Record<string, (() => Promise<void>)[]>>({});
   const undoSeq = useRef(0);
@@ -617,7 +658,41 @@ function AssistantSheet({
 
   useEffect(() => {
     latest.current = { state, goals, profile: lifeProfile, apply };
+    liveOnRef.current = liveState !== 'off';
+    dockedRef.current = docked;
   });
+
+  const callOn = liveState !== 'off';
+  useEffect(() => onCall(callOn), [callOn, onCall]);
+
+  // Back from the bar: the window slides up again where it left.
+  const wasDocked = useRef(docked);
+  useEffect(() => {
+    if (wasDocked.current && !docked) reopenSheet();
+    wasDocked.current = docked;
+  }, [docked, reopenSheet]);
+
+  // Messages since the window opened, so closing it can have Beerus go
+  // over the conversation and keep what lasts (the learning pass).
+  const counts = useRef({ loaded: -1, now: 0, date: state.date });
+  useEffect(() => {
+    if (loaded && counts.current.loaded < 0) counts.current.loaded = messages.length;
+    counts.current.now = messages.length;
+    counts.current.date = state.date;
+  });
+  useEffect(
+    () => () => {
+      const c = counts.current;
+      if (c.loaded >= 0 && c.now > c.loaded) void learnFromConversation(c.date);
+    },
+    [],
+  );
+
+  function flashNote(text: string) {
+    setLiveNote(text);
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setLiveNote(null), 4000);
+  }
 
   // Closing the sheet hangs up.
   useEffect(() => {
@@ -630,6 +705,16 @@ function AssistantSheet({
    */
   async function handleTool(call: ToolCall): Promise<Record<string, unknown>> {
     const now = latest.current;
+    // Beerus looks something up in his long-term memory: his own model
+    // reads everything he knows about the Player, the files included.
+    if (call.name === 'recall' && now) {
+      flashNote('Checking his memory…');
+      const answer = await recallAbout(String(call.args.question ?? '').slice(0, 400), now.state.date);
+      // Found: the bar goes back to what is being said.
+      clearTimeout(noteTimer.current);
+      setLiveNote(null);
+      return { answer };
+    }
     if (call.name !== 'apply_changes' || !now) return { error: `unknown tool ${call.name}` };
     const { changes, refused } = vetChanges(call.args.changes, {
       today: now.state.date,
@@ -662,8 +747,12 @@ function AssistantSheet({
       setLiveState('off');
       resumeMusic();
       setError(res.error ?? 'Beerus could not open a live call.');
+      // The reason is shown in the window, not on a bar that is about to go.
+      setDocked(false);
       return;
     }
+    setMuted(false);
+    setVideo(null);
     try {
       callRef.current = await startLiveCall(res.data, {
         onState: (s) => setLiveState(s === 'ended' ? 'off' : s),
@@ -671,16 +760,30 @@ function AssistantSheet({
         onModelText: (text) => setLiveTurns((t) => addText(t, 'model', text)),
         onTurnEnd: () => setLiveTurns(closeTurns),
         onToolCall: handleTool,
+        onVideo: (kind) => {
+          if (!kind) setVideo(null);
+        },
         onEnd: (err) => {
           callRef.current = null;
           setLiveState('off');
           setLiveTurns(closeTurns);
+          setVideo(null);
+          setMuted(false);
           resumeMusic();
           if (err) setError(err);
-          // Stored, so the typed assistant and the next call remember it.
+          // Stored, so the typed assistant and the next call remember it;
+          // then Beerus goes over it and keeps what lasts, since the voice
+          // model saves things only when it remembers to.
           const turns = liveTurnsRef.current;
-          void logLiveCall(toLog(turns.slice(loggedTurns.current)));
+          const date = latest.current?.state.date ?? state.date;
+          void logLiveCall(toLog(turns.slice(loggedTurns.current))).then(() => learnFromConversation(date));
           loggedTurns.current = turns.length;
+          // Ended from the bar: the window is not open, so Beerus goes home.
+          // A call that failed shows why in the window instead.
+          if (dockedRef.current) {
+            if (err) setDocked(false);
+            else setLeaving(true);
+          }
         },
       }, mode === 'interview' ? '(The Player opened a live call so you can get to know them for their profile.)' : undefined);
     } catch (err) {
@@ -693,6 +796,53 @@ function AssistantSheet({
   function endLive() {
     playSound('tap');
     callRef.current?.end();
+  }
+
+  function toggleMute() {
+    playSound('tap');
+    const next = !muted;
+    callRef.current?.setMuted(next);
+    setMuted(next);
+  }
+
+  async function showVideo(kind: VideoKind, side: 'user' | 'environment' = facing) {
+    const call = callRef.current;
+    if (!call) return;
+    try {
+      const stream = await call.startVideo(kind, side);
+      setVideo({ kind, stream });
+    } catch (err) {
+      flashNote(err instanceof Error ? err.message : 'That could not start.');
+    }
+  }
+
+  function toggleCamera() {
+    playSound('tap');
+    if (video?.kind === 'camera') callRef.current?.stopVideo();
+    else void showVideo('camera');
+  }
+
+  function flipCamera() {
+    playSound('tap');
+    const next = facing === 'user' ? 'environment' : 'user';
+    setFacing(next);
+    void showVideo('camera', next);
+  }
+
+  function toggleScreen() {
+    playSound('tap');
+    if (video?.kind === 'screen') callRef.current?.stopVideo();
+    else void showVideo('screen');
+  }
+
+  function minimize() {
+    playSound('tap');
+    onClose();
+  }
+
+  function expand() {
+    playSound('tap');
+    setDocked(false);
   }
 
   /** How loud the call is, read by Beerus every frame so his body moves with the voice. */
@@ -982,6 +1132,31 @@ function AssistantSheet({
     { label: 'Suggest quests that fit my life', icon: 'quests', run: () => chooseMode('board') },
   ];
 
+  if (docked) {
+    const said = [...liveTurns].reverse().find((t) => t.text.trim());
+    return (
+      <View style={styles.dockLayer} pointerEvents="box-none">
+        <LiveDock
+          state={liveState}
+          caption={error ? { role: 'model', text: error } : said ? { role: said.role, text: said.text } : null}
+          note={liveNote}
+          muted={muted}
+          video={video}
+          facing={facing}
+          canScreen={screenShareSupported()}
+          bottom={insets.bottom + 70}
+          onCamera={toggleCamera}
+          onFlip={flipCamera}
+          onScreen={toggleScreen}
+          onMute={toggleMute}
+          onEnd={endLive}
+          onExpand={expand}
+        />
+        <BeerusActor leaving={leaving} onHome={onClosed} onLaunch={onLaunch} busy={liveState === 'connecting'} mood={mood} voice={liveLevel} />
+      </View>
+    );
+  }
+
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       {/* Modal content renders outside the app's root view on Android, so it
@@ -1076,9 +1251,12 @@ function AssistantSheet({
                 </View>
               </Pressable>
               {!wide ? (
-                <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close Beerus">
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel={liveState !== 'off' ? 'Keep talking while you use the app' : 'Close Beerus'}>
                   <View style={styles.round}>
-                    <Icon name="close" size={icon.bar} color={palette.textMuted} />
+                    <Icon name={liveState !== 'off' ? 'down' : 'close'} size={icon.bar} color={palette.textMuted} />
                   </View>
                 </Pressable>
               ) : null}
@@ -1220,7 +1398,16 @@ function AssistantSheet({
                 </ScrollView>
 
                 {liveState !== 'off' ? (
-                  <LivePanel state={liveState} onEnd={endLive} bottomInset={insets.bottom} />
+                  <LivePanel
+                    state={liveState}
+                    onEnd={endLive}
+                    bottomInset={insets.bottom}
+                    muted={muted}
+                    camera={video?.kind === 'camera'}
+                    onMute={toggleMute}
+                    onCamera={toggleCamera}
+                    onMinimize={minimize}
+                  />
                 ) : configured ? (
                   <View style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
                     <View style={styles.column}>
@@ -1401,7 +1588,26 @@ const LIVE_STATUS: Record<Exclude<LiveState, 'ended'>, string> = {
  * header, his body rippling with whoever is talking; what is happening in
  * words; and one way out.
  */
-function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () => void; bottomInset: number }) {
+function LivePanel({
+  state,
+  onEnd,
+  bottomInset,
+  muted,
+  camera,
+  onMute,
+  onCamera,
+  onMinimize,
+}: {
+  state: LiveState;
+  onEnd: () => void;
+  bottomInset: number;
+  muted: boolean;
+  camera: boolean;
+  onMute: () => void;
+  onCamera: () => void;
+  /** Shrink to the bar over the app, still talking. */
+  onMinimize: () => void;
+}) {
   const key = state === 'ended' ? 'connecting' : state;
   return (
     <View style={[styles.livePanel, { paddingBottom: bottomInset + space.md }]}>
@@ -1409,6 +1615,11 @@ function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () 
       <SystemText variant="body" color={palette.textMuted} style={styles.liveStatus}>
         {LIVE_STATUS[key]}
       </SystemText>
+      <View style={styles.liveControls}>
+        <DockButton name={camera ? 'cameraOff' : 'camera'} on={camera} label={camera ? 'Turn the camera off' : 'Show Beerus your camera'} onPress={onCamera} />
+        <DockButton name={muted ? 'micOff' : 'mic'} on={muted} label={muted ? 'Unmute the microphone' : 'Mute the microphone'} onPress={onMute} />
+        <DockButton name="down" label="Keep talking while you use the app" onPress={onMinimize} />
+      </View>
       <Pressable onPress={onEnd} accessibilityRole="button" accessibilityLabel="End the live call">
         <View style={styles.hangUp}>
           <Icon name="hangUp" size={icon.bar} color={palette.text} />
@@ -1419,6 +1630,138 @@ function LivePanel({ state, onEnd, bottomInset }: { state: LiveState; onEnd: () 
       </Pressable>
     </View>
   );
+}
+
+/**
+ * A live call kept open while the Player uses the app, the way Gemini Live
+ * sits over the phone: a bar near the bottom with Beerus in the middle, the
+ * camera, the screen, the microphone and a way out, and above it what was
+ * last said. Everything else on screen stays usable. Tapping Beerus or the
+ * words opens the full transcript.
+ */
+function LiveDock({
+  state,
+  caption,
+  note,
+  muted,
+  video,
+  facing,
+  canScreen,
+  bottom,
+  onCamera,
+  onFlip,
+  onScreen,
+  onMute,
+  onEnd,
+  onExpand,
+}: {
+  state: LiveState | 'off';
+  caption: { role: 'user' | 'model'; text: string } | null;
+  note: string | null;
+  muted: boolean;
+  video: { kind: VideoKind; stream: MediaStream } | null;
+  facing: 'user' | 'environment';
+  canScreen: boolean;
+  bottom: number;
+  onCamera: () => void;
+  onFlip: () => void;
+  onScreen: () => void;
+  onMute: () => void;
+  onEnd: () => void;
+  onExpand: () => void;
+}) {
+  const status = state === 'off' || state === 'ended' ? 'Connecting…' : LIVE_STATUS[state];
+  const camera = video?.kind === 'camera';
+  const screen = video?.kind === 'screen';
+  return (
+    <View style={[styles.liveDock, { bottom }]} pointerEvents="box-none">
+      {video ? <VideoPreview stream={video.stream} mirrored={camera && facing === 'user'} /> : null}
+      <Pressable onPress={onExpand} accessibilityRole="button" accessibilityLabel="Open the call transcript">
+        <Animated.View
+          key={note ?? caption?.text.slice(0, 12) ?? status}
+          entering={FadeIn.duration(160)}
+          style={[styles.dockCaption, caption?.role === 'user' && !note ? styles.dockCaptionUser : null]}>
+          <SystemText
+            variant="body"
+            color={note ? palette.accentSoft : caption ? palette.text : palette.textMuted}
+            numberOfLines={3}
+            style={styles.dockCaptionText}>
+            {note ?? caption?.text ?? status}
+          </SystemText>
+        </Animated.View>
+      </Pressable>
+      <View style={styles.dockBar}>
+        <DockButton
+          name={camera ? 'cameraOff' : 'camera'}
+          on={camera}
+          label={camera ? 'Turn the camera off' : 'Show Beerus your camera'}
+          onPress={onCamera}
+        />
+        {camera ? (
+          <DockButton name="flipCamera" label="Switch camera" onPress={onFlip} />
+        ) : canScreen ? (
+          <DockButton name="screen" on={screen} label={screen ? 'Stop sharing your screen' : 'Share your screen with Beerus'} onPress={onScreen} />
+        ) : null}
+        <Pressable onPress={onExpand} accessibilityRole="button" accessibilityLabel="Open the call transcript">
+          <View style={styles.dockOrb}>
+            <View {...beerusSlot('live')} style={styles.dockSlot} />
+          </View>
+        </Pressable>
+        <DockButton name={muted ? 'micOff' : 'mic'} on={muted} label={muted ? 'Unmute the microphone' : 'Mute the microphone'} onPress={onMute} />
+        <DockButton name="close" danger label="End the live call" onPress={onEnd} />
+      </View>
+    </View>
+  );
+}
+
+/** One round button on the live bar, at least 48 px to hit. */
+function DockButton({
+  name,
+  label,
+  onPress,
+  on,
+  danger,
+}: {
+  name: IconName;
+  label: string;
+  onPress: () => void;
+  on?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: Boolean(on) }}>
+      <View style={[styles.dockButton, on && styles.dockButtonOn, danger && styles.dockButtonDanger]}>
+        <Icon name={name} size={icon.bar} color={on ? palette.bg : danger ? palette.negative : palette.text} />
+      </View>
+    </Pressable>
+  );
+}
+
+/** What the camera or screen is sending, small, so the Player sees what Beerus sees. */
+function VideoPreview({ stream, mirrored }: { stream: MediaStream; mirrored: boolean }) {
+  const host = useRef<View | null>(null);
+  useEffect(() => {
+    const el = host.current as unknown as HTMLElement | null;
+    if (!el || typeof document === 'undefined') return;
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.srcObject = stream;
+    Object.assign(video.style, {
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      transform: mirrored ? 'scaleX(-1)' : 'none',
+    });
+    el.appendChild(video);
+    void video.play().catch(() => {});
+    return () => {
+      video.srcObject = null;
+      video.remove();
+    };
+  }, [stream, mirrored]);
+  return <View ref={host} style={styles.dockPreview} aria-hidden />;
 }
 
 /** A vetted change back in the shape the model sends, to check it again. */
@@ -1561,6 +1904,55 @@ const styles = StyleSheet.create({
   heroSlot: { width: 88, height: 88 },
   heroSlotWide: { width: 108, height: 108 },
   liveSlot: { width: 104, height: 104 },
+  liveControls: { flexDirection: 'row', justifyContent: 'center', gap: space.md },
+  dockLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 60 },
+  liveDock: { position: 'absolute', left: space.md, right: space.md, alignItems: 'center', gap: space.sm },
+  dockCaption: {
+    maxWidth: 520,
+    alignSelf: 'center',
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderRadius: radius.lg,
+    backgroundColor: alpha(palette.surfaceRaised, 0.94),
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  dockCaptionUser: { backgroundColor: alpha(palette.text, 0.12), borderColor: alpha(palette.text, 0.14) },
+  dockCaptionText: { fontSize: 16, lineHeight: 22 },
+  dockBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    backgroundColor: alpha(palette.surface, 0.96),
+    borderWidth: 1,
+    borderColor: alpha(palette.accent, 0.35),
+    boxShadow: `0 10px 30px ${alpha(palette.bg, 0.6)}, 0 0 24px ${alpha(palette.accent, 0.18)}`,
+  } as object,
+  dockOrb: { width: 76, height: 56, alignItems: 'center', justifyContent: 'center' },
+  dockSlot: { width: 64, height: 64 },
+  dockButton: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.surfaceRaised,
+  },
+  dockButtonOn: { backgroundColor: palette.accent },
+  dockButtonDanger: { backgroundColor: alpha(palette.negative, 0.16) },
+  dockPreview: {
+    width: 112,
+    height: 150,
+    alignSelf: 'flex-end',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: alpha(palette.accent, 0.4),
+    backgroundColor: palette.bg,
+  },
   // Beside the corner of the newest change, where he points.
   pointSlot: { position: 'absolute', top: -16, right: -10, width: 34, height: 34 },
   // Round 44pt buttons, like the close and action buttons on an iOS sheet.

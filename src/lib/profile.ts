@@ -6,12 +6,14 @@ import {
   DOCUMENT_TYPES,
   findField,
   MAX_DOCUMENT_BYTES,
+  MAX_INLINE_BYTES,
   valueOf,
   type LifeProfile,
   type ProfileDocument,
   type WeeklyBlock,
 } from '@/data/lifeProfile';
 import { callSystem, type AssistantResult } from '@/lib/assistant';
+import { client } from '@/lib/supabase';
 
 /**
  * The life profile on the server (supabase/functions/profile): read it,
@@ -64,22 +66,35 @@ export async function readDocumentFile(file: {
   uri: string;
   name: string;
   mimeType: string;
+  size?: number;
   today: string;
 }): Promise<AssistantResult<{ document: ProfileDocument; facts: ProfileFieldWrite[] }>> {
-  let data: string;
-  try {
-    data = await base64Of(file.uri);
-  } catch {
-    return { ok: false, error: 'The file could not be read on this device.' };
+  // Kept first: into the Player's own folder of the private bucket, so
+  // Beerus can read it whole again later (recall). If that fails, a small
+  // file still goes inline and is read once.
+  const path = await keepFile(file);
+  let body: Record<string, unknown>;
+  if (path) {
+    body = { op: 'document', name: file.name, mimeType: file.mimeType, path, today: file.today };
+  } else {
+    if (file.size && file.size > MAX_INLINE_BYTES) {
+      return { ok: false, error: 'That file could not be uploaded, and it is too big to send directly. Try again, or use a file under 4 MB.' };
+    }
+    let data: string;
+    try {
+      data = await base64Of(file.uri);
+    } catch {
+      return { ok: false, error: 'The file could not be read on this device.' };
+    }
+    body = { op: 'document', name: file.name, mimeType: file.mimeType, data, today: file.today };
   }
-  // A document is read by the flagship with Flash behind it; that can take
-  // longer than a chat reply.
-  const res = await callSystem<{ document?: unknown; facts?: unknown }>(
-    { op: 'document', name: file.name, mimeType: file.mimeType, data, today: file.today },
-    'profile',
-    90_000,
-  );
-  if (!res.ok || !res.data) return { ok: false, error: res.error };
+  // A long PDF or a voice memo takes Beerus a while to read.
+  const res = await callSystem<{ document?: unknown; facts?: unknown }>(body, 'profile', 120_000);
+  if (!res.ok || !res.data) {
+    // Nothing points at a file that was never read: delete the kept copy.
+    if (path && client) void client.storage.from('knowledge').remove([path]);
+    return { ok: false, error: res.error };
+  }
   const document = readDocument(res.data.document);
   if (!document) return { ok: false, error: 'Beerus read it, but the answer was not usable.' };
   const facts = Array.isArray(res.data.facts)
@@ -111,10 +126,13 @@ export async function pickAndImportDocument(profile: LifeProfile, today: string)
   if (picked.canceled || !picked.assets?.[0]) return null;
   const file = picked.assets[0];
   if (file.size && file.size > MAX_DOCUMENT_BYTES) {
-    return { ok: false, error: 'That file is too big. Keep it under 4 MB: a photo or a one-page PDF is plenty.' };
+    return { ok: false, error: 'That file is too big. Keep it under 20 MB.' };
   }
-  const mimeType = file.mimeType ?? (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-  const res = await readDocumentFile({ uri: file.uri, name: file.name, mimeType, today });
+  const mimeType = file.mimeType || typeFromName(file.name);
+  if (!mimeType) {
+    return { ok: false, error: 'Beerus reads PDFs, photos, text files and voice memos. Save a Word or Pages file as a PDF first.' };
+  }
+  const res = await readDocumentFile({ uri: file.uri, name: file.name, mimeType, size: file.size, today });
   if (!res.ok || !res.data) return { ok: false, error: res.error ?? 'That document could not be read.' };
   const { document, facts } = res.data;
 
@@ -160,8 +178,59 @@ function readDocument(raw: unknown): ProfileDocument | null {
     summary: typeof d.summary === 'string' ? d.summary : '',
     weekly: Array.isArray(d.weekly) ? (d.weekly as WeeklyBlock[]) : [],
     dates: Array.isArray(d.dates) ? (d.dates as { date: string; title: string }[]) : [],
+    notes: typeof d.notes === 'string' ? d.notes : '',
+    kept: d.kept === true,
     createdAt: typeof d.createdAt === 'string' ? d.createdAt : '',
   };
+}
+
+/** A browser that reports no type: guess it from the name, or null for one Beerus cannot read. */
+function typeFromName(name: string): string | null {
+  const ext = name.toLowerCase().split('.').pop() ?? '';
+  const known: Record<string, string> = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    txt: 'text/plain',
+    md: 'text/markdown',
+    csv: 'text/csv',
+    json: 'application/json',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/m4a',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    webm: 'audio/webm',
+  };
+  return known[ext] ?? null;
+}
+
+/**
+ * Upload a picked file to the Player's own folder of the private
+ * `knowledge` bucket (the folder is their user id, which is what the storage
+ * rules check). Null when signed out or the upload failed.
+ */
+async function keepFile(file: { uri: string; name: string; mimeType: string }): Promise<string | null> {
+  if (!client) return null;
+  const { data: session } = await client.auth.getSession();
+  const userId = session.session?.user.id;
+  if (!userId) return null;
+  const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(-80) || 'file';
+  const path = `${userId}/${Date.now()}-${safe}`;
+  try {
+    const body = Platform.OS === 'web' ? await (await fetch(file.uri)).blob() : await new File(file.uri).bytes();
+    const { error } = await client.storage.from('knowledge').upload(path, body, { contentType: file.mimeType, upsert: false });
+    if (error) {
+      console.warn('[profile] could not keep the file', error.message);
+      return null;
+    }
+    return path;
+  } catch (err) {
+    console.warn('[profile] could not keep the file', err);
+    return null;
+  }
 }
 
 /** A picked file as base64: a blob: URL on the web, a file on a phone. */

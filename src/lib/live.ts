@@ -24,6 +24,11 @@ const REJOIN_TRIES = 5;
 const REJOIN_STEP_MS = 1_500;
 /** Move this long before Gemini cuts a connection it warned about. */
 const CUT_MARGIN_MS = 2_000;
+/** One picture a second from the camera or the screen: what Gemini Live takes. */
+const FRAME_MS = 1_000;
+/** The longest side of a picture sent to Gemini. */
+const FRAME_SIDE = 768;
+const FRAME_QUALITY = 0.7;
 
 /**
  * A live voice call with The System, in the browser.
@@ -62,12 +67,30 @@ export interface LiveHandlers {
   onToolCall: (call: ToolCall) => Promise<Record<string, unknown>>;
   /** The call is over. `error` is set when it ended badly. */
   onEnd: (error?: string) => void;
+  /** The camera or the screen started or stopped sending (null: neither). */
+  onVideo?: (kind: VideoKind | null) => void;
 }
+
+export type VideoKind = 'camera' | 'screen';
 
 export interface LiveCall {
   end: () => void;
   /** How loud the call is right now, 0 to 1: whoever is talking, you or The System. */
   level: () => number;
+  /** Stop or start sending the microphone. The call stays open; The System can still talk. */
+  setMuted: (muted: boolean) => void;
+  /**
+   * Let The System see: the camera (front or back) or the screen, one
+   * picture a second. Resolves to the stream for a preview, or rejects
+   * with a reason the Player can act on.
+   */
+  startVideo: (kind: VideoKind, facing?: 'user' | 'environment') => Promise<MediaStream>;
+  stopVideo: () => void;
+}
+
+/** Screen sharing exists only where the browser offers it: not on a phone. */
+export function screenShareSupported(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 }
 
 export function liveSupported(): boolean {
@@ -132,6 +155,10 @@ export async function startLiveCall(
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let limitTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The Player muted the microphone: nothing is sent until they unmute. */
+  let muted = false;
+  let video: { kind: VideoKind; stream: MediaStream; el: HTMLVideoElement; timer: ReturnType<typeof setInterval> } | null = null;
+  let canvas: HTMLCanvasElement | null = null;
 
   const finish = (error?: string) => {
     if (ended) return;
@@ -139,6 +166,7 @@ export async function startLiveCall(
     clearTimeout(leaveTimer);
     clearTimeout(retryTimer);
     clearTimeout(limitTimer);
+    stopVideo();
     node?.port.close();
     node?.disconnect();
     stream?.getTracks().forEach((t) => t.stop());
@@ -231,7 +259,7 @@ export async function startLiveCall(
     const source = ctx.createMediaStreamSource(media);
     node = new AudioWorkletNode(ctx, 'system-capture');
     node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
-      if (!ended) sendAudio(ev.data, ctx.sampleRate);
+      if (!ended && !muted) sendAudio(ev.data, ctx.sampleRate);
     };
     source.connect(node);
     micTap = ctx.createAnalyser();
@@ -409,6 +437,70 @@ export async function startLiveCall(
     window.addEventListener('touchend', wake, { once: true });
   }
 
+  /** One picture from the camera or screen, as a small JPEG, to Gemini. */
+  function sendFrame() {
+    if (!video || !ready || ended) return;
+    const { el } = video;
+    const w = el.videoWidth;
+    const h = el.videoHeight;
+    if (!w || !h) return;
+    const scale = Math.min(1, FRAME_SIDE / Math.max(w, h));
+    canvas ??= document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+    const url = canvas.toDataURL('image/jpeg', FRAME_QUALITY);
+    send({ realtimeInput: { video: { data: url.slice(url.indexOf(',') + 1), mimeType: 'image/jpeg' } } });
+  }
+
+  async function startVideo(kind: VideoKind, facing: 'user' | 'environment' = 'environment'): Promise<MediaStream> {
+    if (ended) throw new Error('The call has ended.');
+    let media: MediaStream;
+    try {
+      media =
+        kind === 'screen'
+          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+          : await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 } }, audio: false });
+    } catch (err) {
+      const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      throw new Error(
+        denied
+          ? kind === 'screen'
+            ? 'Screen sharing was not allowed.'
+            : 'Beerus needs the camera for this. Allow it for this site, then try again.'
+          : `The ${kind === 'screen' ? 'screen share' : 'camera'} could not start.`,
+      );
+    }
+    stopVideo();
+    if (ended) {
+      media.getTracks().forEach((t) => t.stop());
+      throw new Error('The call has ended.');
+    }
+    const el = document.createElement('video');
+    el.muted = true;
+    el.playsInline = true;
+    el.srcObject = media;
+    await el.play().catch(() => {});
+    // The browser's own "Stop sharing" button ends the track: stop with it.
+    media.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (video?.stream === media) stopVideo();
+    });
+    video = { kind, stream: media, el, timer: setInterval(sendFrame, FRAME_MS) };
+    handlers.onVideo?.(kind);
+    return media;
+  }
+
+  function stopVideo() {
+    if (!video) return;
+    clearInterval(video.timer);
+    video.stream.getTracks().forEach((t) => t.stop());
+    video.el.srcObject = null;
+    video = null;
+    if (!ended) handlers.onVideo?.(null);
+  }
+
   connect();
 
   const loudness = (tap: AnalyserNode | null) => {
@@ -419,6 +511,16 @@ export async function startLiveCall(
 
   return {
     end: () => finish(),
-    level: () => (ended ? 0 : Math.max(loudness(micTap), loudness(outTap))),
+    level: () => (ended ? 0 : Math.max(muted ? 0 : loudness(micTap), loudness(outTap))),
+    setMuted: (next) => {
+      if (muted === next) return;
+      muted = next;
+      pending = new Float32Array(0);
+      // Tell Gemini the microphone paused, so it does not wait out a turn
+      // that will not finish.
+      if (muted && ready) send({ realtimeInput: { audioStreamEnd: true } });
+    },
+    startVideo,
+    stopVideo,
   };
 }

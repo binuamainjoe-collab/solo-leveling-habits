@@ -5,23 +5,40 @@
  *   get       — the profile and the documents
  *   set       — save fields: [{section, field, value}] (only catalogue
  *               fields, cleaned; with onlyEmpty, never overwrites)
- *   document  — read an uploaded PDF or photo (a class timetable, a
- *               syllabus, a work rota): Gemini pulls out the weekly blocks,
- *               the dates and what it says about the Player's life. The
- *               file is not kept; what was in it is. Profile facts come back
- *               to the app, which applies them with Undo.
- *   forget    — archive a document
+ *   document  — read a file the Player gave Beerus to learn from: a class
+ *               timetable, a syllabus, a CV, notes, a journal page, a photo,
+ *               a voice memo. Beerus's model (Gemini 4 Hydrogen unless the
+ *               Player picked another) pulls out the weekly blocks, the
+ *               dates, profile facts and detailed notes on what the file
+ *               says about the Player; the notes go into every prompt from
+ *               then on. A file sent by its storage path (the app uploads
+ *               it to the private `knowledge` bucket first) is kept there,
+ *               so recall can read it whole later; one sent inline is not
+ *               kept. Profile facts come back to the app, which applies them
+ *               with Undo.
+ *   forget    — archive a document, and delete its kept file
  *
  * The model proposes; code decides: every field is checked against the
  * catalogue, every block's day and times are checked before they are stored.
  */
 
 import { caller, claimCalls, fail, finishRun, gemini, json, MODEL, parseJson, preflight, startRun } from '../_shared/agent.ts';
-import { CATALOG, cleanValue, isField, sanitize, type LifeProfile, type WeeklyBlock } from '../_shared/profile.ts';
+import { modelsForRole } from '../_shared/models.ts';
+import {
+  bytesToBase64,
+  CATALOG,
+  cleanValue,
+  isField,
+  libraryType,
+  MAX_LIBRARY_BYTES,
+  sanitize,
+  type LifeProfile,
+  type WeeklyBlock,
+} from '../_shared/profile.ts';
+import { settingsOf } from '../_shared/system.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
-const DOCUMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-/** About 4 MB of file, base64-encoded. */
+/** About 4 MB of file, base64-encoded: a file sent inline. Bigger files go through storage. */
 const MAX_DOCUMENT_B64 = 5_600_000;
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -30,19 +47,20 @@ const PROFILE_KEYS = Object.entries(CATALOG)
   .flatMap(([section, def]) => Object.entries(def.fields).map(([f, label]) => `${section}.${f} (${label})`))
   .join(', ');
 
-const READ_SYSTEM = `You read a document a student uploaded to their personal assistant: usually a class timetable, sometimes a syllabus, an exam schedule, a work rota or a photo of a planner.
-Extract only what is actually in the document. Never invent times, dates or courses.
-- kind: "timetable", "exam_schedule", "syllabus", "work_rota" or "other".
+const READ_SYSTEM = `You read a file the Player gave Beerus, their personal assistant, so he can get to know them: a class timetable, a syllabus, an exam schedule, a work rota, a CV, notes, a journal page, a photo or a voice memo.
+Extract only what is actually in the file. Never invent times, dates, courses or facts.
+- kind: "timetable", "exam_schedule", "syllabus", "work_rota", "personal" (about the Player themselves: a CV, a journal, notes on their life) or "other".
 - title: a short name for it.
 - summary: one or two plain sentences on what it is and what matters in it for planning their weeks.
 - weekly: every recurring weekly block: day ("mon".."sun"), start and end ("HH:MM", 24-hour), title (the course or shift, short), place (room or location, if given). A block that runs on several days is listed once per day.
 - dates: one-off dated items (exams, deadlines, events): date "YYYY-MM-DD" and a short title. If the year is not written, use the next occurrence after today.
-- facts: what the document tells you about the student's life, as profile fields: section and field from this list, and a short value in third person. Fields: ${PROFILE_KEYS}. Only facts the document clearly supports (for example studies.program, studies.school, studies.subjects, studies.exams, career.hours). At most 6.`;
+- facts: what the document tells you about the student's life, as profile fields: section and field from this list, and a short value in third person. Fields: ${PROFILE_KEYS}. Only facts the document clearly supports (for example studies.program, studies.school, studies.subjects, studies.exams, career.hours). At most 6.
+- notes: everything in the file that would help Beerus know the Player and plan their days, written as short plain lines in third person, up to about 4000 characters. Keep specifics exact: names of courses, people (name and role only), places, dates, times, numbers, goals, likes and dislikes. For a timetable, every course and when; for a CV, education, jobs and skills; for a journal or a voice memo, what matters to them. Leave out passwords, codes, long numbers and health or medical details.`;
 
 const READ_SCHEMA = {
   type: 'object',
   properties: {
-    kind: { type: 'string', enum: ['timetable', 'exam_schedule', 'syllabus', 'work_rota', 'other'] },
+    kind: { type: 'string', enum: ['timetable', 'exam_schedule', 'syllabus', 'work_rota', 'personal', 'other'] },
     title: { type: 'string' },
     summary: { type: 'string' },
     weekly: {
@@ -78,9 +96,10 @@ const READ_SCHEMA = {
         propertyOrdering: ['section', 'field', 'value'],
       },
     },
+    notes: { type: 'string' },
   },
-  required: ['kind', 'title', 'summary', 'weekly', 'dates', 'facts'],
-  propertyOrdering: ['kind', 'title', 'summary', 'weekly', 'dates', 'facts'],
+  required: ['kind', 'title', 'summary', 'weekly', 'dates', 'facts', 'notes'],
+  propertyOrdering: ['kind', 'title', 'summary', 'weekly', 'dates', 'facts', 'notes'],
 };
 
 function str(v: unknown, max: number): string {
@@ -148,14 +167,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
       readProfile(db),
       db
         .from('profile_documents')
-        .select('id, name, kind, summary, weekly, dates, created_at')
+        .select('id, name, kind, summary, weekly, dates, notes, mime_type, storage_path, created_at')
         .is('archived_at', null)
         .order('created_at', { ascending: false })
         .limit(20),
     ]);
     return json({
       profile,
-      documents: (docs.data ?? []).map((d) => ({ ...d, createdAt: d.created_at })),
+      documents: (docs.data ?? []).map(({ storage_path, mime_type, ...d }) => ({
+        ...d,
+        notes: d.notes ?? '',
+        mimeType: mime_type ?? null,
+        kept: Boolean(storage_path),
+        createdAt: d.created_at,
+      })),
     });
   }
 
@@ -195,37 +220,69 @@ Deno.serve(async (req: Request): Promise<Response> => {
   /* ------------------------------------------------------------- forget */
   if (body.op === 'forget') {
     const id = str(body.id, 64);
+    const { data: doc } = await db.from('profile_documents').select('storage_path').eq('id', id).maybeSingle();
     const { error } = await db.from('profile_documents').update({ archived_at: new Date().toISOString() }).eq('id', id);
     if (error) return fail('The System could not remove that document.', 500);
+    // Forgetting a file deletes the kept copy too: Beerus cannot look in it again.
+    if (doc?.storage_path) {
+      const { error: removeError } = await db.storage.from('knowledge').remove([String(doc.storage_path)]);
+      if (removeError) console.error('kept file not deleted', removeError.message);
+      await db.from('profile_documents').update({ storage_path: null }).eq('id', id);
+    }
     return json({ ok: true });
   }
 
   /* ----------------------------------------------------------- document */
   if (body.op === 'document') {
-    const mimeType = str(body.mimeType, 40).toLowerCase();
-    const data = typeof body.data === 'string' ? body.data : '';
+    const reported = str(body.mimeType, 60).toLowerCase();
+    const mimeType = libraryType(reported);
     const name = str(body.name, 80) || 'Document';
     const today = /^\d{4}-\d{2}-\d{2}$/.test(str(body.today, 10)) ? str(body.today, 10) : new Date().toISOString().slice(0, 10);
-    if (!DOCUMENT_TYPES.includes(mimeType)) return fail('The System reads PDFs and photos (JPEG, PNG, WebP, HEIC).', 400);
-    if (data.length < 100) return fail('That file was empty.', 400);
-    if (data.length > MAX_DOCUMENT_B64) return fail('That file is too big. Keep it under 4 MB.', 413);
-    if (!/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 2000))) return fail('That file was not readable.', 400);
+    if (!mimeType) {
+      return fail('Beerus reads PDFs, photos, text files and voice memos. Save a Word or Pages file as a PDF first.', 400);
+    }
+
+    // Either kept in the Player's own folder of the private bucket (the app
+    // uploaded it there) or sent inline (older apps, small files).
+    const path = str(body.path, 300);
+    let data = '';
+    let size = 0;
+    if (path) {
+      if (!path.startsWith(`${userId}/`) || path.includes('..')) return fail('That file is not yours to read.', 403);
+      const { data: blob, error: downloadError } = await db.storage.from('knowledge').download(path);
+      if (downloadError || !blob) return fail('Beerus could not open the uploaded file. Try again.', 404);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      size = bytes.length;
+      if (size < 20) return fail('That file was empty.', 400);
+      if (size > MAX_LIBRARY_BYTES) return fail('That file is too big. Keep it under 20 MB.', 413);
+      data = bytesToBase64(bytes);
+    } else {
+      data = typeof body.data === 'string' ? body.data : '';
+      if (data.length < 100) return fail('That file was empty.', 400);
+      if (data.length > MAX_DOCUMENT_B64) return fail('That file is too big. Keep it under 4 MB.', 413);
+      if (!/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 2000))) return fail('That file was not readable.', 400);
+      size = Math.floor((data.length * 3) / 4);
+    }
 
     // Reading a document is a model call: it draws on the shadows' budget.
     const claim = await claimCalls(sys, 1);
     if (!claim.ok) return claim.response;
 
+    const settings = await settingsOf(db);
     const runId = await startRun(db, 'profile-document');
     const result = await gemini({
       system: READ_SYSTEM,
       prompt: `Today is ${today}. The file is called "${name}". Read it.`,
       file: { mimeType, data },
       schema: READ_SCHEMA,
+      // Beerus reads his own files: the Player's pick (Hydrogen by default).
+      models: modelsForRole('beerus', settings.models, (n) => Deno.env.get(n)),
+      budgetMs: 90_000,
     });
     const spend = { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL };
     if (!result.ok || !result.text) {
       await finishRun(db, runId, 'error', null, result.error ?? 'reading failed', spend);
-      return fail('The System could not read that document. Try a clearer photo or the PDF.', 502);
+      return fail('Beerus could not read that file. Try a clearer photo, or the PDF.', 502);
     }
 
     const out = parseJson<Record<string, unknown>>(result.text) ?? {};
@@ -236,23 +293,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>) : {}))
       .map((x) => ({ section: str(x.section, 30), field: str(x.field, 30), value: cleanValue(x.value) ?? '' }))
       .filter((x) => isField(x.section, x.field) && x.value);
-    const kind = ['timetable', 'exam_schedule', 'syllabus', 'work_rota'].includes(str(out.kind, 20)) ? str(out.kind, 20) : 'other';
+    const kinds = ['timetable', 'exam_schedule', 'syllabus', 'work_rota', 'personal'];
+    const kind = kinds.includes(str(out.kind, 20)) ? str(out.kind, 20) : 'other';
     const summary = str(out.summary, 400);
     const title = str(out.title, 80) || name;
+    // Line breaks kept: the notes read as a list in the prompt.
+    const notes = typeof out.notes === 'string' ? out.notes.replace(/\r/g, '').trim().slice(0, 8000) : '';
 
     const { data: saved, error } = await db
       .from('profile_documents')
-      .insert({ name: title, kind, summary, weekly, dates })
-      .select('id, name, kind, summary, weekly, dates, created_at')
+      .insert({
+        name: title,
+        kind,
+        summary,
+        weekly,
+        dates,
+        notes,
+        storage_path: path || null,
+        mime_type: reported.split(';')[0],
+        size_bytes: size,
+      })
+      .select('id, name, kind, summary, weekly, dates, notes, created_at')
       .single();
     if (error || !saved) {
       await finishRun(db, runId, 'error', null, error?.message ?? 'store failed', spend);
-      return fail('The System read it but could not store it.', 500);
+      return fail('Beerus read it but could not store it.', 500);
     }
-    await finishRun(db, runId, 'ok', `${kind}: ${weekly.length} weekly blocks, ${dates.length} dates`, null, spend);
+    await finishRun(db, runId, 'ok', `${kind}: ${weekly.length} weekly blocks, ${dates.length} dates, ${notes.length} chars of notes`, null, spend);
 
     // The facts go back to the app, which applies them with Undo.
-    return json({ document: { ...saved, createdAt: saved.created_at }, facts });
+    return json({ document: { ...saved, kept: Boolean(path), createdAt: saved.created_at }, facts });
   }
 
   return fail('Unknown operation.', 400);
