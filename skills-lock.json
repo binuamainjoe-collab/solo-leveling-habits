@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "llm-evaluation": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/llm-evaluation/SKILL.md",
+      "computedHash": "3986d5cdb5f5e240b16555d5d94c7759f741432b3c0595c0833a3c4ba31613dc",
+      "installMode": "copy"
+    }
+  }
+}

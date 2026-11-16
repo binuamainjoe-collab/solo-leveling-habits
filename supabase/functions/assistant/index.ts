@@ -27,6 +27,12 @@
  *
  * Every model call here runs on the model the Player picked for Beerus
  * (Gemini 4 Hydrogen unless they chose another), and only on it.
+ *
+ * Beerus's framework (../_shared/beerus/, after OpenJarvis's primitives)
+ * shapes each `send`: the router decides how much conversation and memory
+ * the message needs and how hard to think, memory retrieval picks the
+ * memories related to it, and after the reply a trace row is stored and a
+ * learning pass starts on its own when enough has been said.
  */
 
 import {
@@ -40,10 +46,26 @@ import {
   preflight,
   startRun,
 } from '../_shared/agent.ts';
+import {
+  ACTIONS,
+  type Action,
+  buildPrompt,
+  checkReply,
+  MEMORY_KINDS,
+  type MemoryKind,
+  type Mode,
+  MODES,
+  NEVER_REMEMBER,
+  type Proposed,
+  RESPONSE_SCHEMA,
+  SYSTEM,
+} from '../_shared/beerus/contract.ts';
+import { buildTrace, shouldLearn, type Trace } from '../_shared/beerus/learning.ts';
+import { analyze, fitHistory, route } from '../_shared/beerus/router.ts';
 import { APP_TIMEOUT_MS, CHAT_BUDGET_MS, DEEP_TIMEOUT_MS, modelsForRole } from '../_shared/models.ts';
 import { CATALOG, cleanValue, isField, loadLibrary, sanitize } from '../_shared/profile.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
-import { CHANGE_FIELDS, CORE, knowledge, nowBlock, OPS, settingsOf, str } from '../_shared/system.ts';
+import { knowledge, nowBlock, settingsOf, str } from '../_shared/system.ts';
 
 /**
  * Assistant model calls per UTC day — its own pool, apart from the planner
@@ -61,129 +83,7 @@ const MAX_REPLY = 1200;
 const MAX_AUDIO_B64 = 6_000_000;
 const AUDIO_TYPES = ['audio/m4a', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp3'];
 
-const ACTIONS = ['none', 'plan_today', 'plan_tomorrow', 'open_planner', 'open_goals', 'open_quests', 'suggest_quests', 'open_profile'] as const;
-
-/**
- * What the Player opened the System for.
- *   chat      — a normal message
- *   interview — "get to know me": it asks about the empty profile fields
- *   board     — "suggest quests from my profile": a proposal, not a change
- */
-const MODES = ['chat', 'interview', 'board'] as const;
-type Mode = (typeof MODES)[number];
-/** What a quest proposal may change. */
-const BOARD_OPS = ['add_quest', 'remove_quest', 'set_target'];
-
-function modeRules(mode: Mode, empty: string[]): string {
-  if (mode === 'interview') {
-    return `INTERVIEW — the Player asked you to get to know them, to fill their PROFILE.
-- Ask about ONE thing at a time, short and natural, like a person getting to know them, not a form. You may ask about two closely related fields together.
-- The empty fields, most useful first: ${empty.slice(0, 14).join(', ') || 'none — the profile is full; ask what has changed lately'}.
-- Start with what helps you plan their days most: studies, routine, work, training.
-- Every answer they give: save it at once with set_profile, and in the same reply ask the next question. Acknowledge in a few words; no praise.
-- If they skip a question, move on. After about ten answers, or when they want to stop, stop asking, say what you now understand about their days in one sentence, and offer suggest_quests as the action.`;
-  }
-  if (mode === 'board') {
-    return `QUEST PROPOSAL — the Player asked you to suggest a quest board that fits their PROFILE.
-- Look at the PROFILE, the goals, their routine and how recent days went, then propose the changes that make the board fit their life: add_quest, remove_quest and set_target only, at most 6, using ids from CONTEXT. Fewer is fine; the most important first.
-- Respect their load: a full schedule gets fewer, smaller quests. A bulk wants protein and lifting; a cut wants protein and steps; studies want study and review quests sized to their exams.
-- In reply, say in two to four sentences what you propose and why, tied to specific things in their profile.
-- These changes are a PROPOSAL: the app shows them with Accept. Never say they are done.`;
-  }
-  return '';
-}
-type Action = (typeof ACTIONS)[number];
-
-const MEMORY_KINDS = ['fact', 'preference', 'commitment', 'pattern'] as const;
-type MemoryKind = (typeof MEMORY_KINDS)[number];
-
-/**
- * Never stored, whatever the model proposes: credentials, long numbers that
- * could be account or card numbers, and health details. The last is a
- * deliberate line — this is a coach, not a medical record.
- */
-const NEVER_REMEMBER =
-  /password|passcode|api[ _-]?key|secret|token|\b\d{9,}\b|\b(adhd|diagnos\w*|medicat\w*|prescri\w*|therap\w*|disorder|dosage|symptom\w*)\b/i;
-
-const SYSTEM = `${CORE}
-
-VOICE
-- Short. One to four sentences for most replies. No headings, no bullet lists unless they ask for a list.
-- Calm, direct, warm. A light System flavour is fine ("Quest logged.", "Noted, Player."), at most once per reply, never forced.
-- No exclamation marks. No hype. No guilt. No urgency language.
-- Never mention diagnoses, conditions or medical topics, and never give medical, legal or financial advice. If asked, say briefly that it is outside what you do.
-- Never claim to have done something you did not put in changes.
-
-CHANGING THE SYSTEM — you can change the app itself. Put each change in changes; the app checks it, applies it at once, and gives the Player an Undo button.
-${OPS}
-- For a plan, offer plan_today or plan_tomorrow instead.
-- Most replies change nothing. Return an empty list.
-
-ACTIONS — set action to offer ONE button under your reply. It does nothing until they tap it:
-- plan_tomorrow: they want to plan tomorrow, or it is evening and tomorrow has no plan and planning fits the conversation.
-- plan_today: they want to plan or re-plan today.
-- open_planner: they want to see today's or tomorrow's timeline.
-- open_goals: goals, findings or the shadows came up.
-- open_quests: they want to tick things off or see the board.
-- suggest_quests: the profile has changed in a way that should change their quests, or they ask what quests would suit them.
-- open_profile: they want to see or edit what you know about them.
-- none: most replies.
-
-MEMORY — remember: up to 3 short, durable things worth knowing next week, in the Player's favour:
-- fact (an exam date, a deadline, where they study), preference (likes mornings, hates long lists), commitment (gym Tue/Thu), pattern (keeps skipping reading after 22:00 — only when CONTEXT shows it more than once).
-- Only what they said or what CONTEXT plainly shows. One idea per memory, written in third person, under 140 characters, dates absolute (YYYY-MM-DD).
-- Never: anything already in MEMORY or the PROFILE, passing moods, passwords or numbers, health or medical details, anything about other people beyond a name and a role.
-- Whenever the Player tells you something lasting about themselves, remember it. Small talk remembers nothing: return an empty list.
-- Use what you know. Tie advice to specific things in the PROFILE, MEMORY and their files, the way someone who knows them would, without reciting it back.
-
-suggestions: up to 3 short replies the Player might tap next, in their voice, at most 6 words each. Empty when nothing obvious.
-
-SPOKEN MESSAGES
-- When the new message is an audio clip, write what the Player said in heard — their words, cleaned of filler (um, uh) — and answer it exactly as if they had typed it. If you cannot make out any words, leave heard empty and reply that you did not catch it.
-- Your reply to a spoken message is read aloud. Keep it to one or two short sentences, and use no symbols, arrows, emoji or lists.
-- For a typed message, heard is empty.`;
-
-const RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    heard: { type: 'string' },
-    reply: { type: 'string' },
-    suggestions: { type: 'array', items: { type: 'string' } },
-    action: { type: 'string', enum: [...ACTIONS] },
-    remember: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          kind: { type: 'string', enum: [...MEMORY_KINDS] },
-          content: { type: 'string' },
-        },
-        required: ['kind', 'content'],
-        propertyOrdering: ['kind', 'content'],
-      },
-    },
-    changes: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: CHANGE_FIELDS,
-        required: ['op'],
-        propertyOrdering: ['op', 'quest_id', 'target', 'title', 'amount', 'wake', 'sleep', 'planning_hour', 'goal_title', 'deadline', 'goal_id', 'section', 'field', 'value'],
-      },
-    },
-  },
-  required: ['reply', 'suggestions', 'action', 'remember', 'changes'],
-  propertyOrdering: ['heard', 'reply', 'suggestions', 'action', 'remember', 'changes'],
-};
-
-interface Proposed {
-  heard?: unknown;
-  reply?: unknown;
-  suggestions?: unknown;
-  action?: unknown;
-  remember?: unknown;
-  changes?: unknown;
-}
+/* The prompt, the reply shape and the reply rules live in ../_shared/beerus/contract.ts. */
 
 /** Keep only memories that pass every rule above. Exported shape for the app. */
 function vetMemories(raw: unknown, known: Set<string>, max = 3): { kind: MemoryKind; content: string }[] {
@@ -277,6 +177,13 @@ async function learn(db: SupabaseClient, sys: SupabaseClient, userId: string, to
   // Nothing new, or nothing the Player said: no model call.
   if (!messages.some((m) => m.role === 'user')) return json({ learned: [], profile: [] });
 
+  // One pass at a time per account (claim_learning in the beerus_traces
+  // migration): a second request while one runs spends nothing. Released
+  // below when the bookmark moves; a pass that dies lets go after 2 minutes.
+  const { data: free, error: lockError } = await db.rpc('claim_learning');
+  if (lockError) console.warn('learning lock unavailable, going ahead', lockError.message);
+  else if (free !== true) return json({ learned: [], profile: [], busy: true });
+
   const { data: claimed, error: claimError } = await sys.rpc('bump_pool', { p_pool: 'assistant', p_limit: ASSISTANT_CAP });
   if (claimError) return fail('The System could not reach its budget counter. Try again in a minute.', 503);
   if (claimed === null) return fail(`Beerus has used all ${ASSISTANT_CAP} of today's turns. He will catch up tomorrow.`, 429);
@@ -331,7 +238,10 @@ async function learn(db: SupabaseClient, sys: SupabaseClient, userId: string, to
   const last = messages[messages.length - 1].created_at as string;
   const { error: markError } = await db
     .from('user_settings')
-    .upsert({ user_id: userId, learned_until: last, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    .upsert(
+      { user_id: userId, learned_until: last, learning_started_at: null, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
   if (markError) console.error('learning bookmark not moved', markError.message);
 
   await finishRun(db, runId, 'ok', `learned ${learned.length} memories, ${fields.length} profile fields`, null, spend);
@@ -388,6 +298,41 @@ async function recall(db: SupabaseClient, sys: SupabaseClient, question: string,
   const answer = str(result.text, 1200);
   await finishRun(db, runId, 'ok', answer.slice(0, 200), null, spend);
   return json({ answer });
+}
+
+/* ------------------------------------------------------------ background */
+
+/**
+ * Work that may finish after the reply has gone: the trace row and a
+ * learning pass. Supabase's EdgeRuntime keeps the function alive for it;
+ * anywhere without it, the promise simply runs on its own.
+ */
+function later(work: Promise<unknown>): void {
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
+  const safe = work.catch((e) => console.error('background work failed', e instanceof Error ? e.message : String(e)));
+  if (runtime?.waitUntil) runtime.waitUntil(safe);
+}
+
+/** One trace row (see beerus/learning.ts). Losing it never fails a reply. */
+async function storeTrace(db: SupabaseClient, trace: Trace): Promise<void> {
+  const { error } = await db.from('beerus_traces').insert(trace);
+  if (error) console.warn('trace not stored', error.message);
+}
+
+/**
+ * Whether enough has been said since the last learning pass to start
+ * another (shouldLearn in beerus/learning.ts), counting the Player's
+ * messages after the bookmark.
+ */
+async function learningDue(db: SupabaseClient, learnedUntil: string | null): Promise<boolean> {
+  let query = db.from('assistant_messages').select('id', { count: 'exact', head: true }).eq('role', 'user');
+  if (learnedUntil) query = query.gt('created_at', learnedUntil);
+  const { count, error } = await query;
+  if (error) {
+    console.warn('could not count unlearned messages', error.message);
+    return false;
+  }
+  return shouldLearn({ unlearnedUserMessages: count ?? 0, learnedUntil });
 }
 
 /* ------------------------------------------------------------------ serve */
@@ -459,43 +404,63 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return fail(`The System has answered all ${ASSISTANT_CAP} of today's messages. It resets tomorrow.`, 429);
   }
 
-  const now = nowBlock(body.now);
+  // The router reads the message first and decides how much this reply
+  // needs: how much conversation, which memories, whether the quest
+  // catalogue goes in, how hard to think and the prompt's budget
+  // (beerus/router.ts). The model itself is always the Player's pick.
+  const ctx = analyze(typed, { mode, spoken: Boolean(audio) });
+  const plan = route(ctx);
+  const now = nowBlock(body.now, { catalog: plan.catalog });
 
   // Everything the System knows, gathered in one pass (shared with the
-  // live voice call, so both are the same System), and the model the
-  // Player picked for Beerus.
-  const [known, settings] = await Promise.all([knowledge(db, now.today, HISTORY_FOR_MODEL), settingsOf(db)]);
+  // live voice call, so both are the same System), with the memories most
+  // related to this message, and the model the Player picked for Beerus.
+  const [known, settings] = await Promise.all([
+    // A spoken message has no words to rank on before the model hears it:
+    // no retrieval, every memory.
+    knowledge(db, now.today, Math.min(plan.historyTurns, HISTORY_FOR_MODEL), audio ? undefined : { query: typed, topK: plan.memoryTopK }),
+    settingsOf(db),
+  ]);
   const focus = known.focusId ? { id: known.focusId } : null;
   const memories = known.memories;
   const forgotten = known.forgotten;
 
-  const transcript = known.history.length
-    ? known.history.map((m) => `${m.role === 'user' ? 'Player' : 'System'}: ${m.text}`).join('\n')
-    : '(this is the first message)';
+  // The prompt without its conversation, then as much of the conversation
+  // as the route's budget allows (oldest turns go first, never below four).
+  const promptParts = { now: now.text, knowledge: known.text, mode, profileEmpty: known.profileEmpty, message: typed, spoken: Boolean(audio) };
+  const fixedChars = SYSTEM.length + buildPrompt({ ...promptParts, history: [] }).length;
+  const fit = fitHistory(fixedChars, known.history, plan.budgetChars);
+  const prompt = buildPrompt({ ...promptParts, history: fit.kept });
 
-  const prompt = [
-    'CONTEXT',
-    now.text,
-    '',
-    known.text,
-    '',
-    'CONVERSATION SO FAR',
-    transcript,
-    '',
-    modeRules(mode, known.profileEmpty),
-    '',
-    'NEW MESSAGE FROM THE PLAYER',
-    audio ? '(spoken — the audio clip attached below)' : typed,
-  ]
-    .filter((l) => l !== '')
-    .join('\n');
+  // One trace row per reply, whatever the outcome (beerus/learning.ts).
+  const traceOf = (
+    outcome: Trace['outcome'],
+    r?: { usage?: { in: number; out: number; thoughts: number }; durationMs?: number; modelVersion?: string },
+    extra: { changes?: number; remembered?: number; learnStarted?: boolean; violations?: string[]; changesDropped?: number } = {},
+  ) =>
+    buildTrace({
+      ctx,
+      route: plan,
+      historyTurns: fit.kept.length,
+      memoriesSent: known.memoriesSent,
+      memoriesTotal: known.memories.length,
+      promptChars: SYSTEM.length + prompt.length,
+      durationMs: r?.durationMs,
+      usage: r?.usage,
+      model: r?.modelVersion ?? null,
+      outcome,
+      catalogSent: now.catalogSent,
+      historyTrimmed: fit.trimmed,
+      overBudget: fit.over,
+      ...extra,
+    });
 
   const runId = await startRun(db, 'assistant');
   const result = await gemini({
     system: SYSTEM,
     prompt,
     schema: RESPONSE_SCHEMA,
-    thinkingLevel: 'low',
+    thinkingLevel: plan.thinking,
     audio,
     // Typed and spoken both go to Beerus's model alone (Gemini 4 Hydrogen
     // unless the Player picked another): no quiet switch to a model they
@@ -515,6 +480,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       durationMs: result.durationMs,
       model: result.modelVersion ?? MODEL,
     });
+    later(Promise.resolve().then(() => storeTrace(db, traceOf('error', result))));
     return fail(result.error ?? 'The System went quiet. Try again.', 502);
   }
 
@@ -527,6 +493,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       durationMs: result.durationMs,
       model: result.modelVersion ?? MODEL,
     });
+    later(Promise.resolve().then(() => storeTrace(db, traceOf('too_slow', result))));
     return fail('The System took too long to answer. Try again.', 504);
   }
 
@@ -537,10 +504,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const text = audio ? heard : typed;
   if (audio && !heard) {
     await finishRun(db, runId, 'ok', 'voice: nothing heard', null, { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL });
+    later(Promise.resolve().then(() => storeTrace(db, traceOf('not_heard', result))));
     return fail('The System could not make out what you said. Try again, a little closer to the mic.', 422);
   }
   if (!reply) {
     await finishRun(db, runId, 'error', null, 'empty reply', { usage: result.usage, durationMs: result.durationMs, model: result.modelVersion ?? MODEL });
+    later(Promise.resolve().then(() => storeTrace(db, traceOf('error', result))));
     return fail('The System went quiet. Try saying that again.', 502);
   }
 
@@ -575,16 +544,41 @@ Deno.serve(async (req: Request): Promise<Response> => {
     model: result.modelVersion ?? MODEL,
   });
 
-  // Passed on unjudged: the app holds the rules (src/data/questEdits.ts) and
-  // the state they are checked against, so it is the one that decides.
-  // A quest proposal holds quest changes only; anything else in it was
-  // never meant to wait behind an Accept button.
-  const changes = Array.isArray(out?.changes)
-    ? out!.changes
-        .filter((c) => c && typeof c === 'object')
-        .filter((c) => mode !== 'board' || BOARD_OPS.includes(String((c as Record<string, unknown>).op)))
-        .slice(0, 8)
-    : [];
+  // The contract (beerus/contract.ts): every reply is checked and every
+  // broken rule recorded in the trace. A non-quest change inside a quest
+  // proposal is held back here, as before; everything else goes to the app,
+  // which holds the rest of the rules (src/data/questEdits.ts) and shows
+  // the Player why it refused anything (an invented quest id, say).
+  const checked = checkReply(out, { spoken: Boolean(audio), mode, questIds: now.questIds, goalIds: known.goalIds });
+  const changes = checked.changes;
+  const changesDropped = checked.dropped;
+  if (checked.violations.length) console.warn('beerus contract', checked.violations.join(','));
+
+  // After the reply: the trace, and a learning pass if enough has been said
+  // since the last one, so Beerus keeps what he hears without waiting for
+  // the app to ask. The exchange above is already stored, so the pass
+  // reads it too.
+  later(
+    (async () => {
+      let learnRan = false;
+      if (await learningDue(db, settings.learnedUntil)) {
+        const res = await learn(db, sys, userId, now.today);
+        const body = (await res.json().catch(() => ({}))) as { busy?: unknown };
+        learnRan = res.ok && body.busy !== true;
+        if (!res.ok) console.warn('background learning pass failed', res.status);
+      }
+      await storeTrace(
+        db,
+        traceOf('ok', result, {
+          changes: changes.length,
+          remembered: remembered.length,
+          learnStarted: learnRan,
+          violations: checked.violations,
+          changesDropped,
+        }),
+      );
+    })(),
+  );
 
   // A quest proposal is shown with Accept; it changes nothing until then.
   return json({ reply, suggestions, action, remembered, changes, heard: audio ? heard : null, proposal: mode === 'board' });

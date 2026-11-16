@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.117.3';
 
+import { rankMemories } from './beerus/memory.ts';
 import { CATALOG, loadProfile } from './profile.ts';
 
 /** Every profile field, as the model must name them: "studies.program, …". */
@@ -87,8 +88,16 @@ function daysUntil(date: string, today: string): number | null {
  * What the app says about right now, re-read field by field and capped.
  * It goes into the prompt, so nothing oversized or malformed gets through
  * to crowd out the rules above it.
+ *
+ * `catalog: false` leaves the catalogue out (Beerus's router decides; most
+ * messages never add a quest, and the catalogue is the biggest block here).
+ * `questIds` are every quest id the app sent (board and catalogue), for
+ * checking a reply's changes.
  */
-export function nowBlock(raw: unknown): { text: string; today: string } {
+export function nowBlock(
+  raw: unknown,
+  opts: { catalog?: boolean } = {},
+): { text: string; today: string; questIds: Set<string>; catalogSent: boolean } {
   const c = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(str(c.date, 10)) ? str(c.date, 10) : new Date().toISOString().slice(0, 10);
 
@@ -113,7 +122,14 @@ export function nowBlock(raw: unknown): { text: string; today: string } {
   const calendar = Array.isArray(c.calendar) ? c.calendar.map((e) => str(e, 100)).filter(Boolean).slice(0, 18) : [];
 
   const quests = Array.isArray(c.quests) ? c.quests.map((q) => str(q, 160)).filter(Boolean).slice(0, 30) : [];
-  const catalog = Array.isArray(c.catalog) ? c.catalog.map((q) => str(q, 90)).filter(Boolean).slice(0, 120) : [];
+  const fullCatalog = Array.isArray(c.catalog) ? c.catalog.map((q) => str(q, 90)).filter(Boolean).slice(0, 200) : [];
+  const catalogSent = opts.catalog !== false;
+  const catalog = catalogSent ? fullCatalog : [];
+  const idOf = (line: string) => line.split(' — ')[0].trim();
+  // Every id the app would accept, whether or not the catalogue went into
+  // the prompt: the check is there to catch invented ids, not ids the model
+  // happened not to be shown.
+  const questIds = new Set([...quests, ...fullCatalog].map(idOf).filter(Boolean));
 
   const lines = [
     `Now: ${str(c.weekday, 12)} ${date}, ${str(c.time, 5)}`,
@@ -132,8 +148,11 @@ export function nowBlock(raw: unknown): { text: string; today: string } {
     str(c.screen, 30) ? `They opened you from: ${str(c.screen, 30)}` : '',
     quests.length ? `Quests on the board (id — title — today — kind):\n${quests.map((q) => `  ${q}`).join('\n')}` : '',
     catalog.length ? `Catalogue quests not on the board (id — title):\n${catalog.map((q) => `  ${q}`).join('\n')}` : '',
+    !catalogSent && fullCatalog.length
+      ? 'Catalogue quests: not included for this message. To add a quest, ask the Player to say which, and it will be.'
+      : '',
   ];
-  return { text: lines.filter(Boolean).join('\n'), today: date };
+  return { text: lines.filter(Boolean).join('\n'), today: date, questIds, catalogSent: catalogSent && fullCatalog.length > 0 };
 }
 
 /* -------------------------------------------------------------- knowledge */
@@ -142,7 +161,12 @@ export interface Knowledge {
   /** Goals, findings, memory, forgotten and recent days, ready for the prompt. */
   text: string;
   focusId: string | null;
+  /** Every active goal's id, for checking a reply's goal changes. */
+  goalIds: Set<string>;
+  /** Every active memory (for de-duplicating new ones), not only those in `text`. */
   memories: { kind: string; content: string }[];
+  /** How many memories went into `text` (all of them unless a retrieval query picked fewer). */
+  memoriesSent: number;
   forgotten: string[];
   /** The recent conversation, oldest first. */
   history: { role: string; text: string }[];
@@ -170,8 +194,17 @@ export async function settingsOf(db: SupabaseClient): Promise<{ models: Record<s
  *
  * `db` must be the caller's own client (see `caller()` in agent.ts), so the
  * row rules limit every read below to that account.
+ *
+ * With `retrieve`, only the `topK` memories most relevant to `query` go into
+ * the prompt text (rankMemories in beerus/memory.ts); without it, all of
+ * them, as before. The live call and the learning pass use it without.
  */
-export async function knowledge(db: SupabaseClient, today: string, historyLimit: number): Promise<Knowledge> {
+export async function knowledge(
+  db: SupabaseClient,
+  today: string,
+  historyLimit: number,
+  retrieve?: { query: string; topK: number },
+): Promise<Knowledge> {
   const [profile, goalsRes, memRes, forgottenRes, snapRes, historyRes] = await Promise.all([
     loadProfile(db, today),
     db
@@ -182,7 +215,7 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
       .order('created_at', { ascending: true }),
     db
       .from('memories')
-      .select('id, kind, content')
+      .select('id, kind, content, last_seen_at')
       .is('archived_at', null)
       .order('last_seen_at', { ascending: false })
       .limit(MAX_MEMORIES_IN),
@@ -234,7 +267,19 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
     (f) => `  ${f.verdict === 'must-read' ? 'MUST READ' : 'read'}: ${str(f.title, 120)}${f.minutes_to_consume ? ` (~${f.minutes_to_consume} min)` : ''}`,
   );
 
-  const memories = (memRes.data ?? []).map((m) => ({ kind: String(m.kind), content: str(m.content, 280) }));
+  const loaded = (memRes.data ?? []).map((m) => ({
+    kind: String(m.kind),
+    content: str(m.content, 280),
+    lastSeen: typeof m.last_seen_at === 'string' ? m.last_seen_at : null,
+  }));
+  const memories = loaded.map(({ kind, content }) => ({ kind, content }));
+  // The query is the new message plus the Player's last two messages, so a
+  // follow-up ("and the second one?") still finds what it is about.
+  const lastSaid = (historyRes.data ?? [])
+    .filter((m) => m.role === 'user')
+    .slice(0, 2)
+    .map((m) => str(m.text, 400));
+  const shown = retrieve ? rankMemories([retrieve.query, ...lastSaid].join(' '), loaded, retrieve.topK) : loaded;
   const forgotten = (forgottenRes.data ?? []).map((m) => str(m.content, 280));
 
   const snapLines = (snapRes.data ?? []).map(
@@ -250,7 +295,10 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
     findingLines.length ? `Unread findings for the focus goal:\n${findingLines.join('\n')}` : '',
     '',
     'MEMORY (what you already know):',
-    memories.length ? memories.map((m) => `  (${m.kind}) ${m.content}`).join('\n') : '  nothing yet',
+    shown.length ? shown.map((m) => `  (${m.kind}) ${m.content}`).join('\n') : '  nothing yet',
+    shown.length < memories.length
+      ? `  (${memories.length - shown.length} more memories not shown here: the ones least related to this message)`
+      : '',
     forgotten.length
       ? `FORGOTTEN (the Player asked you to forget these; never remember them, or anything saying the same thing, again):\n${forgotten.map((f) => `  ${f}`).join('\n')}`
       : '',
@@ -264,7 +312,9 @@ export async function knowledge(db: SupabaseClient, today: string, historyLimit:
   return {
     text,
     focusId: (focus?.id as string | undefined) ?? null,
+    goalIds: new Set(goals.map((g) => String(g.id))),
     memories,
+    memoriesSent: shown.length,
     forgotten,
     history: (historyRes.data ?? []).reverse().map((m) => ({ role: String(m.role), text: str(m.text, 1500) })),
     profileEmpty: profile.empty,
