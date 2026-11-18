@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { FlatList, Pressable, RectButton } from 'react-native-gesture-handler';
+import { FlatList, Pressable } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 import { CollectibleCard } from '@/components/card/CollectibleCard';
@@ -10,22 +10,23 @@ import { usePressTilt } from '@/components/collection/tilt';
 import { MotionScroll } from '@/components/motion/MotionScroll';
 import { Card } from '@/components/system/Card';
 import { RangeSwitch } from '@/components/system/Panel';
+import { FilterChips } from '@/components/collection/FilterChips';
 import { useContentWidth } from '@/components/system/Screen';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { palette, space } from '@/constants/theme';
 import { CARDS, rarityMeta, type CardDef, type Rarity } from '@/data/cards';
 import { useProgress } from '@/store/progress';
 
 type Filter = 'all' | 'owned' | 'locked' | Rarity;
 
-const FILTERS: { key: Filter; label: string; color: string }[] = [
-  { key: 'all', label: 'ALL', color: palette.accent },
-  { key: 'owned', label: 'OWNED', color: palette.positive },
-  { key: 'locked', label: 'LOCKED', color: palette.textMuted },
-  { key: 'rare', label: 'RARE', color: rarityMeta.rare.color },
-  { key: 'epic', label: 'EPIC', color: rarityMeta.epic.color },
-  { key: 'legendary', label: 'LEGENDARY', color: rarityMeta.legendary.color },
-  { key: 'mythic', label: 'MYTHIC', color: rarityMeta.mythic.color },
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'owned', label: 'Owned' },
+  { key: 'locked', label: 'Locked' },
+  { key: 'rare', label: 'Rare' },
+  { key: 'epic', label: 'Epic' },
+  { key: 'legendary', label: 'Legendary' },
+  { key: 'mythic', label: 'Mythic' },
 ];
 
 /** Rarest first, then owned before locked, so the good stuff leads. */
@@ -81,79 +82,61 @@ export function CardsPanel() {
 
   const mythics = CARDS.filter((c) => c.rarity === 'mythic' && owned.has(c.id)).length;
 
-  const top = (
-    <>
-      <View style={styles.head}>
-        <Card contentStyle={styles.summary}>
-          <View style={styles.summaryItem}>
-            <SystemText variant="label">COLLECTED</SystemText>
-            <SystemText variant="numeral" numberOfLines={1} color={palette.accent} style={styles.summaryValue}>
-              {owned.size}
-              <SystemText variant="meta" style={styles.of}> / {CARDS.length}</SystemText>
-            </SystemText>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.summaryItem}>
-            <SystemText variant="label">MYTHIC</SystemText>
-            <SystemText variant="numeral" numberOfLines={1} color={rarityMeta.mythic.color} style={styles.summaryValue}>
-              {mythics}
-            </SystemText>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.summaryItem}>
-            <SystemText variant="label">COMPLETION</SystemText>
-            <SystemText variant="numeral" numberOfLines={1} color={palette.gold} style={styles.summaryValue}>
-              {Math.round((owned.size / CARDS.length) * 100)}%
-            </SystemText>
-          </View>
-        </Card>
+  // The cards come first: the stats and the filters follow them, so the
+  // screen opens on the collection itself, not on four rows of controls.
+  const stats = (
+    <Card style={styles.stats} contentStyle={styles.summary}>
+      <View style={styles.summaryItem}>
+        <SystemText variant="label">Collected</SystemText>
+        <SystemText variant="numeral" numberOfLines={1} color={palette.accent} style={styles.summaryValue}>
+          {owned.size}
+          <SystemText variant="meta" style={styles.of}> / {CARDS.length}</SystemText>
+        </SystemText>
       </View>
+      <View style={styles.divider} />
+      <View style={styles.summaryItem}>
+        <SystemText variant="label">Mythic</SystemText>
+        <SystemText variant="numeral" numberOfLines={1} color={rarityMeta.mythic.color} style={styles.summaryValue}>
+          {mythics}
+        </SystemText>
+      </View>
+      <View style={styles.divider} />
+      <View style={styles.summaryItem}>
+        <SystemText variant="label">Completion</SystemText>
+        <SystemText variant="numeral" numberOfLines={1} color={palette.gold} style={styles.summaryValue}>
+          {Math.round((owned.size / CARDS.length) * 100)}%
+        </SystemText>
+      </View>
+    </Card>
+  );
 
-      <View style={styles.filters}>
-        {FILTERS.map((f) => (
-          <RectButton
-            key={f.key}
-            onPress={() => setFilter(f.key)}
-            rippleColor={alpha(f.color, 0.2)}
-            accessibilityRole="button"
-            accessibilityLabel={f.label}
-            accessibilityState={{ selected: filter === f.key }}
-            style={[
-              styles.chip,
-              { borderColor: alpha(f.color, filter === f.key ? 0.8 : 0.25) },
-              filter === f.key && { backgroundColor: alpha(f.color, 0.14) },
-            ]}>
-            <SystemText variant="label" color={filter === f.key ? f.color : palette.textFaint}>
-              {f.label}
-            </SystemText>
-          </RectButton>
-        ))}
-        <View style={styles.browse}>
-          <RangeSwitch
-            options={[
-              { value: 'carousel', label: 'Carousel' },
-              { value: 'grid', label: 'Grid' },
-            ]}
-            value={browse}
-            onChange={setBrowse}
-          />
-        </View>
-      </View>
-    </>
+  const controls = (
+    <View style={styles.controls}>
+      <FilterChips filters={FILTERS} value={filter} onChange={setFilter} style={styles.chipScroll} />
+      <RangeSwitch
+        options={[
+          { value: 'carousel', label: 'Carousel' },
+          { value: 'grid', label: 'Grid' },
+        ]}
+        value={browse}
+        onChange={setBrowse}
+      />
+    </View>
   );
 
   if (browse === 'carousel') {
     return (
       <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
-        {top}
         <CardCarousel cards={data} owned={owned} width={width} />
+        {controls}
+        {stats}
       </MotionScroll>
     );
   }
 
   return (
     <View style={styles.panel}>
-      {top}
+      {controls}
       <FlatList
         key={`cols-${gridColumns}`}
         data={data}
@@ -165,6 +148,7 @@ export function CardsPanel() {
         contentContainerStyle={styles.list}
         initialNumToRender={6}
         windowSize={5}
+        ListFooterComponent={stats}
         ListEmptyComponent={
           <Card>
             <SystemText variant="body">Nothing here yet.</SystemText>
@@ -203,10 +187,9 @@ function GridCard({ card, owned }: { card: CardDef; owned: boolean }) {
 
 const styles = StyleSheet.create({
   panel: { flex: 1 },
-  browse: { marginLeft: 'auto' },
   // The card is out on the screen; its slot stands empty until it comes back.
   out: { opacity: 0 },
-  head: { marginBottom: space.lg },
+  stats: { marginTop: space.lg },
   summary: { flexDirection: 'row', alignItems: 'center', padding: space.lg },
   summaryItem: { flex: 1, gap: 2, minWidth: 0 },
   summaryValue: { fontSize: 24, lineHeight: 30, letterSpacing: -0.8 },
@@ -217,12 +200,7 @@ const styles = StyleSheet.create({
     marginHorizontal: space.md,
     backgroundColor: palette.border,
   },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.lg },
-  chip: {
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-  },
+  chipScroll: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.lg, marginBottom: space.sm },
   list: { paddingBottom: space.xxl * 2 },
 });

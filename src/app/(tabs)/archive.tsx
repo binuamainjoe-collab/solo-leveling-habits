@@ -57,7 +57,7 @@ export default function ArchiveScreen() {
     <Screen>
       <View style={styles.head}>
         <SystemText variant="heading" style={styles.heading}>
-          QUEST ARCHIVE
+          Quest Archive
         </SystemText>
         <SystemText variant="body" style={styles.sub}>
           {QUESTS.length} objectives catalogued across {BROWSABLE_CATEGORIES.length} disciplines.
@@ -122,8 +122,7 @@ function FilterChip({
       accessibilityState={{ selected: active }}
       style={[
         styles.chip,
-        { borderColor: alpha(color, active ? 0.8 : 0.25) },
-        active && { backgroundColor: alpha(color, 0.14) },
+        { backgroundColor: alpha(active ? palette.accent : palette.text, active ? 0.18 : 0.06) },
       ]}>
       <SystemText variant="button" color={active ? color : palette.textMuted}>
         {label}
@@ -154,9 +153,7 @@ const ArchiveCard = memo(function ArchiveCard({
         tint={accepted ? palette.positive : undefined}
         contentStyle={styles.cardContent}>
         <View style={styles.cardHead}>
-          <SystemText variant="heading" style={styles.cardGlyph}>
-            {quest.glyph}
-          </SystemText>
+          <View style={[styles.cardDot, { backgroundColor: cat.color }]} />
           <View style={styles.cardText}>
             <SystemText variant="title" numberOfLines={1} style={styles.cardTitle}>
               {quest.title}
@@ -198,8 +195,7 @@ const ArchiveCard = memo(function ArchiveCard({
           style={[
             styles.accept,
             {
-              borderColor: alpha(accepted ? palette.positive : cat.color, 0.6),
-              backgroundColor: accepted ? alpha(palette.positive, 0.12) : 'transparent',
+              backgroundColor: alpha(accepted ? palette.positive : cat.color, accepted ? 0.12 : 0.14),
             },
           ]}>
           <Icon name={accepted ? 'check' : 'plus'} size={icon.small} color={accepted ? palette.positive : cat.color} />
@@ -223,7 +219,6 @@ const styles = StyleSheet.create({
     marginBottom: space.lg,
   },
   chip: {
-    borderWidth: 1,
     borderRadius: radius.pill,
     paddingHorizontal: space.md,
     paddingVertical: 7,
@@ -233,17 +228,16 @@ const styles = StyleSheet.create({
   cellFull: { width: '100%' },
   cardContent: { padding: space.md, minHeight: 150, justifyContent: 'flex-end' },
   cardHead: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
-  cardGlyph: { fontSize: 20, lineHeight: 26 },
+  cardDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
   cardText: { flex: 1, minWidth: 0 },
   cardTitle: { fontSize: 12, letterSpacing: 1.2 },
-  cardObjective: { fontSize: 13, lineHeight: 17, marginTop: 1 },
+  cardObjective: { fontSize: 15, lineHeight: 20, marginTop: 1 },
   cardRank: { fontSize: 12 },
   cardMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm },
   accept: {
     flexDirection: 'row',
     gap: space.xs,
     minHeight: HIT,
-    borderWidth: 1,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',

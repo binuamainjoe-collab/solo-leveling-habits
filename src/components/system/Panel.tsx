@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { revealProps } from '@/components/motion/Reveal';
@@ -9,14 +9,18 @@ import { alpha, HIT, icon, palette, radius, space, SURFACE_ALPHA } from '@/const
 import { playSound } from '@/lib/feedback';
 
 /**
- * A dashboard panel: a symbol, a title that says what the chart is, one
- * line on how to read it, and at most one control on the right (a range
- * switch, a link). The chart goes underneath.
+ * A dashboard panel: a title that says what the chart is, its one figure
+ * (`sub`), and at most one control on the right (a range switch, a link).
+ * The chart goes underneath. It sits on its own surface with no outline:
+ * space and the change of surface are what separate it from the page.
+ *
+ * How to read the chart (`hint`) waits behind an ⓘ.
  */
 export function Panel({
   iconName,
   title,
   sub,
+  hint,
   right,
   children,
   style,
@@ -24,30 +28,55 @@ export function Panel({
   iconName: IconName;
   title: string;
   sub?: string;
+  hint?: string;
   right?: ReactNode;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
+  const [explain, setExplain] = useState(false);
   return (
     <View {...revealProps()} style={[styles.panel, style]}>
       <View style={styles.head}>
-        <View style={styles.badge}>
-          <Icon name={iconName} size={icon.body} color={palette.accentSoft} />
-        </View>
         <View style={styles.headText}>
-          <SystemText variant="title" numberOfLines={1}>
-            {title}
-          </SystemText>
+          <View style={styles.titleRow}>
+            <Icon name={iconName} size={icon.small} color={palette.accentSoft} />
+            <SystemText variant="title" numberOfLines={1} style={styles.title}>
+              {title}
+            </SystemText>
+            {hint ? <InfoButton label={`How to read ${title}`} open={explain} onToggle={() => setExplain((e) => !e)} /> : null}
+          </View>
           {sub ? (
-            <SystemText variant="meta" numberOfLines={1}>
+            <SystemText variant="meta" color={palette.textMuted} numberOfLines={1}>
               {sub}
             </SystemText>
           ) : null}
         </View>
         {right}
       </View>
+      {hint && explain ? (
+        <SystemText variant="meta" color={palette.text}>
+          {hint}
+        </SystemText>
+      ) : null}
       {children}
     </View>
+  );
+}
+
+/** The ⓘ that unfolds an explanation; the caller keeps the open state and the text. */
+export function InfoButton({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
+  return (
+    <Pressable
+      onPress={() => {
+        playSound('tap');
+        onToggle();
+      }}
+      hitSlop={16}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={label}>
+      <Icon name="info" size={icon.small} color={open ? palette.text : palette.textMuted} />
+    </Pressable>
   );
 }
 
@@ -68,6 +97,7 @@ export function RangeSwitch<T extends string>({
         return (
           <Pressable
             key={o.value}
+            hitSlop={{ top: 7, bottom: 7 }}
             onPress={() => {
               if (on) return;
               playSound('tap');
@@ -112,22 +142,14 @@ const styles = StyleSheet.create({
   panel: {
     backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
     borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: palette.border,
     padding: space.lg,
     gap: space.md,
     overflow: 'hidden',
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  badge: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
-    backgroundColor: alpha(palette.accent, 0.12),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headText: { flex: 1, minWidth: 0 },
+  headText: { flex: 1, minWidth: 0, gap: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  title: { flexShrink: 1 },
   switch: {
     flexDirection: 'row',
     backgroundColor: palette.surfaceRaised,

@@ -20,11 +20,7 @@ import { alpha, HIT, icon, palette, radius, space } from '@/constants/theme';
 export function ModelLine({ text, mark }: { text: string; mark?: ReactNode }) {
   return (
     <View style={styles.modelRow}>
-      {mark ?? (
-        <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-          ◆
-        </SystemText>
-      )}
+      {mark}
       <SystemText variant="body" style={styles.modelText}>
         {text}
       </SystemText>
@@ -59,11 +55,7 @@ const blink = {
 export function Typing({ label, mark }: { label?: string | null; mark?: ReactNode }) {
   return (
     <Animated.View entering={FadeIn.duration(160)} style={styles.modelRow} accessibilityLabel="Thinking">
-      {mark ?? (
-        <SystemText variant="label" color={palette.accent} style={styles.modelGlyph}>
-          ◆
-        </SystemText>
-      )}
+      {mark}
       <View style={styles.typing}>
         {[0, 1, 2].map((i) => (
           <Animated.View
@@ -270,13 +262,12 @@ export function RecordingBar({ voice }: { voice: VoiceControls }) {
 
 const styles = StyleSheet.create({
   modelRow: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start', paddingRight: space.lg },
-  modelGlyph: { fontSize: 11, marginTop: 5 },
   modelText: { flex: 1, fontSize: 17, lineHeight: 25, color: palette.text },
 
   userRow: { alignItems: 'flex-end', paddingLeft: space.xxl },
   userBubble: {
     backgroundColor: palette.surfaceHover,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderBottomRightRadius: 6,
     paddingHorizontal: space.md + 2,
     paddingVertical: space.sm + 2,

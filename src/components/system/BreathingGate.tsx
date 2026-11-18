@@ -72,7 +72,7 @@ export function BreathingExercise({ onFinish }: { onFinish: () => void }) {
       style={styles.root}>
       <View style={styles.head}>
         <SystemText variant="label" color={palette.accent} style={styles.kicker}>
-          ◆ Before you begin ◆
+          Before you begin
         </SystemText>
         <SystemText variant="body" style={styles.sub}>
           Four in, four hold, four out, four hold.

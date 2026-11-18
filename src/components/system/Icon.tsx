@@ -58,6 +58,8 @@ const NAMES = {
   person: { ios: 'person', android: 'person', web: 'person' },
   down: { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' },
   bolt: { ios: 'bolt', android: 'bolt', web: 'bolt' },
+  info: { ios: 'info.circle', android: 'info', web: 'info' },
+  goal: { ios: 'diamond', android: 'diamond', web: 'diamond' },
   radar: { ios: 'hexagon', android: 'hexagon', web: 'hexagon' },
   // The shadows: Beru scouts, Igris judges, the Steward watches.
   scout: { ios: 'binoculars', android: 'travel_explore', web: 'travel_explore' },

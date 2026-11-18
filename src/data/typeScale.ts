@@ -1,12 +1,18 @@
 /**
- * Apple's text styles, as numbers — pure, so it can be tested under Node.
+ * The app's text sizes, as numbers — pure, so it can be tested under Node.
  *
- * iOS sets every screen from one short scale (Large Title 34 down to
- * Caption 2 at 11) and never goes below 11. The app used to pick sizes per
- * screen, which is how 8 to 10px uppercase labels with 2px tracking crept in
- * everywhere. SystemText now runs every style through `resolveType`, so
- * any size a screen asks for lands on the nearest step of this scale, with
- * that step's line height.
+ * Five steps from Apple's scale, with big jumps between them so a screen's
+ * hierarchy reads at a glance: Large Title 34, Title 2 22, Body 17,
+ * Subheadline 15, Footnote 13, plus Caption 2 at 11 for badges and tab
+ * labels only. The full iOS scale has ten steps, and using all of them on
+ * one screen (28 next to 22 next to 20) is what made the app read as
+ * medium-loud everywhere. SystemText runs every style through `resolveType`,
+ * so any size a screen asks for lands on the nearest step, with that step's
+ * line height.
+ *
+ * Figures are the exception: a number in a ring or a score is display type,
+ * the way Apple Fitness sets its rings' numbers, so the numeral variant keeps
+ * the size it was given (see `resolveType`).
  */
 
 export interface TypeStep {
@@ -17,17 +23,13 @@ export interface TypeStep {
   leading: number;
 }
 
-/** iOS "Large" (default) Dynamic Type sizes, in points. */
+/** The steps, at iOS "Large" (default) Dynamic Type sizes, in points. */
 export const TYPE_SCALE: readonly TypeStep[] = [
   { name: 'caption2', size: 11, leading: 13 },
-  { name: 'caption1', size: 12, leading: 16 },
   { name: 'footnote', size: 13, leading: 18 },
   { name: 'subheadline', size: 15, leading: 20 },
-  { name: 'callout', size: 16, leading: 21 },
   { name: 'body', size: 17, leading: 22 },
-  { name: 'title3', size: 20, leading: 25 },
   { name: 'title2', size: 22, leading: 28 },
-  { name: 'title1', size: 28, leading: 34 },
   { name: 'largeTitle', size: 34, leading: 41 },
 ];
 
@@ -102,8 +104,20 @@ export function normalizeType(style: TypeFields): TypeFields {
  * in too much air. A line height the screen sets itself is its choice and
  * is kept, as long as it fits the text (see normalizeType).
  */
-export function resolveType(variant: TypeFields, own: TypeFields = {}): TypeFields {
+export function resolveType(variant: TypeFields, own: TypeFields = {}, figure = false): TypeFields {
   const sized = typeof own.fontSize === 'number';
+  if (figure) {
+    // A figure keeps its size (never below the floor); only an impossible line height is fixed.
+    const size = Math.max(MIN, Math.round((sized ? own.fontSize : variant.fontSize) ?? 34));
+    const asked = typeof own.lineHeight === 'number' ? own.lineHeight : sized ? undefined : variant.lineHeight;
+    const tracking = typeof own.letterSpacing === 'number' ? own.letterSpacing : (variant.letterSpacing ?? 0);
+    return {
+      fontSize: size,
+      lineHeight: asked !== undefined && asked >= size ? asked : leadingFor(size),
+      // Big figures may tighten further than text does; they never spread out.
+      letterSpacing: Math.min(MAX_TRACKING, Math.max(MIN_TRACKING * 2, tracking)),
+    };
+  }
   return normalizeType({
     fontSize: sized ? own.fontSize : variant.fontSize,
     lineHeight: typeof own.lineHeight === 'number' ? own.lineHeight : sized ? undefined : variant.lineHeight,

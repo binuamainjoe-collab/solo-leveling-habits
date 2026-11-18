@@ -29,7 +29,7 @@ export function StatusHeader() {
 
       <View style={styles.side}>
         <View style={styles.rankRow}>
-          <View style={[styles.rank, { borderColor: alpha(rankColor, 0.6), backgroundColor: alpha(rankColor, 0.12) }]}>
+          <View style={[styles.rank, { backgroundColor: alpha(rankColor, 0.18) }]}>
             <SystemText variant="title" color={rankColor} style={styles.rankText}>
               {rank}-rank
             </SystemText>
@@ -78,8 +78,6 @@ const styles = StyleSheet.create({
     gap: space.xl,
     backgroundColor: palette.surface,
     borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.18),
     padding: space.xl,
     marginBottom: space.lg,
   },
@@ -87,7 +85,7 @@ const styles = StyleSheet.create({
   inline: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   side: { flex: 1, minWidth: 200, gap: space.sm },
   rankRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },
-  rank: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: 4 },
+  rank: { borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: 4 },
   rankText: { fontSize: 15 },
   stats: {
     flexDirection: 'row',

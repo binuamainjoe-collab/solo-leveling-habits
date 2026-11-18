@@ -12,7 +12,7 @@ import { Radar } from '@/components/charts/Radar';
 import { AbilityCrystal } from '@/components/status/AbilityCrystal';
 import { RankHero } from '@/components/status/RankFire';
 import { StatusRail, useChapters, type Chapter } from '@/components/status/StatusRail';
-import { Panel, RangeSwitch } from '@/components/system/Panel';
+import { InfoButton, Panel, RangeSwitch } from '@/components/system/Panel';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { ModelPicker } from '@/components/system/ModelPicker';
 import { MonthCalendar } from '@/components/system/MonthCalendar';
@@ -22,6 +22,7 @@ import {
   alpha,
   categoryMeta,
   CATEGORIES,
+  HIT,
   palette,
   radius,
   space,
@@ -88,7 +89,7 @@ export default function HunterScreen() {
           <Panel
             iconName="radar"
             title="Ability scores"
-            sub="The shape of your training. A dent is a side of life being left behind."
+            hint="The shape of your training. A dent is a side of life being left behind."
             right={
               threeD ? (
                 <RangeSwitch
@@ -148,9 +149,7 @@ export default function HunterScreen() {
                             transitionDuration: '160ms',
                           },
                         ]}>
-                        <SystemText variant="title" color={meta.color} style={styles.ratingGlyph}>
-                          {meta.glyph}
-                        </SystemText>
+                        <View style={[styles.ratingDot, { backgroundColor: meta.color }]} />
                         <SystemText variant="body" color={palette.text} style={styles.ratingName}>
                           {meta.label}
                         </SystemText>
@@ -179,7 +178,7 @@ export default function HunterScreen() {
         {/* 30-day activity, straight off the day log */}
         <Animated.View entering={FadeInDown.duration(360).delay(60)} onLayout={chapters.onChapter(2)}>
           <View style={styles.labelRow}>
-            <SystemText variant="label" style={[styles.sectionLabel, styles.labelInRow]}>
+            <SystemText variant="title" style={[styles.sectionLabel, styles.labelInRow]}>
               Calendar
             </SystemText>
             {threeD ? (
@@ -200,41 +199,33 @@ export default function HunterScreen() {
 
         {/* Lifetime record */}
         <Animated.View entering={FadeInDown.duration(360).delay(80)} onLayout={chapters.onChapter(3)}>
-          <SystemText variant="label" style={styles.sectionLabel}>
+          <SystemText variant="title" style={styles.sectionLabel}>
             Hunter record
           </SystemText>
           <View style={styles.recordGrid}>
-            <Record label="Quests cleared" value={state.questCompletions} tint={palette.accent} />
-            <Record label="Perfect days" value={state.perfectDays} tint={palette.positive} />
-            <Record label="Current streak" value={`${state.streak}d`} tint={palette.accent} />
-            <Record label="Best streak" value={`${state.bestStreak}d`} tint={palette.gold} />
-            <Record label="Total XP" value={state.xp} tint={palette.violet} />
+            <Record label="Quests cleared" value={state.questCompletions} />
+            <Record label="Perfect days" value={state.perfectDays} />
+            <Record label="Current streak" value={`${state.streak}d`} />
+            <Record label="Best streak" value={`${state.bestStreak}d`} />
+            <Record label="Total XP" value={state.xp} />
             <Record
               label="Trophies"
               value={`${state.unlocked.length}/${ACHIEVEMENTS.length}`}
-              tint={palette.sky}
             />
           </View>
         </Animated.View>
 
         {/* Discipline coverage */}
         <Animated.View entering={FadeInDown.duration(360).delay(160)} onLayout={chapters.onChapter(4)}>
-          <SystemText variant="label" style={styles.sectionLabel}>
-            Discipline coverage
-          </SystemText>
+          <SectionTitle title="Discipline coverage" hint="Days you cleared at least one quest in each discipline." />
           <Card reveal style={styles.block}>
-            <SystemText variant="body" style={styles.blockSub}>
-              Days you cleared at least one quest in each discipline.
-            </SystemText>
             <View style={styles.catList}>
               {CATEGORIES.map((c) => {
                 const meta = categoryMeta[c];
                 const days = state.categoryDays[c] ?? 0;
                 return (
                   <View key={c} style={styles.catRow}>
-                    <SystemText variant="label" color={meta.color} style={styles.catGlyph}>
-                      {meta.glyph}
-                    </SystemText>
+                    <View style={[styles.catDot, { backgroundColor: meta.color }]} />
                     <SystemText variant="label" style={styles.catName}>
                       {meta.short}
                     </SystemText>
@@ -265,7 +256,7 @@ export default function HunterScreen() {
 
         {/* Board summary + reset */}
         <Animated.View entering={FadeInDown.duration(360).delay(240)} onLayout={chapters.onChapter(5)}>
-          <SystemText variant="label" style={styles.sectionLabel}>
+          <SystemText variant="title" style={styles.sectionLabel}>
             System
           </SystemText>
           <Card reveal style={styles.block}>
@@ -301,12 +292,12 @@ export default function HunterScreen() {
             />
           </Card>
 
-          <SystemText variant="label" style={styles.sectionLabel}>
+          <SystemText variant="title" style={styles.sectionLabel}>
             Reminders
           </SystemText>
           <Card reveal style={styles.block}>
             {Platform.OS === 'web' ? (
-              <SystemText variant="meta" style={styles.notConnected}>
+              <SystemText variant="meta">
                 Reminders arrive on the phone app. The browser cannot schedule them.
               </SystemText>
             ) : null}
@@ -332,14 +323,11 @@ export default function HunterScreen() {
             />
           </Card>
 
-          <SystemText variant="label" style={styles.sectionLabel}>
-            Profile
-          </SystemText>
+          <SectionTitle
+            title="Profile"
+            hint="What Beerus knows about your life: studies, routine, training, habits, and the timetables and documents you gave it. It plans and suggests quests from this."
+          />
           <Card reveal style={styles.block}>
-            <SystemText variant="body" style={styles.blockSub}>
-              What Beerus knows about your life: studies, routine, training, habits, and the
-              timetables and documents you gave it. It plans and suggests quests from this.
-            </SystemText>
             <GhostButton
               label="Open your profile"
               onPress={() => {
@@ -349,31 +337,27 @@ export default function HunterScreen() {
             />
           </Card>
 
-          <SystemText variant="label" style={styles.sectionLabel}>
+          <SystemText variant="title" style={styles.sectionLabel}>
             Models
           </SystemText>
           <Card reveal style={styles.block}>
             <ModelPicker />
           </Card>
 
-          <SystemText variant="label" style={styles.sectionLabel}>
+          <SystemText variant="title" style={styles.sectionLabel}>
             Account
           </SystemText>
           <Card reveal style={styles.block}>
             <AccountBlock />
           </Card>
 
-          <SystemText variant="label" style={styles.sectionLabel}>
-            Planner reminder
-          </SystemText>
+          <SectionTitle
+            title="Planner reminder"
+            hint={`From this hour, the Quests board quietly offers to plan tomorrow with you. It never takes over the screen.${
+              state.plansAccepted > 0 ? ` ${state.plansAccepted} plan${state.plansAccepted === 1 ? '' : 's'} made so far.` : ''
+            }`}
+          />
           <Card reveal style={styles.block}>
-            <SystemText variant="body" style={styles.blockSub}>
-              From this hour, the Quests board quietly offers to plan tomorrow with you. It never
-              takes over the screen.
-              {state.plansAccepted > 0
-                ? ` ${state.plansAccepted} plan${state.plansAccepted === 1 ? '' : 's'} made so far.`
-                : ''}
-            </SystemText>
             <TimeChips
               value={state.settings?.briefingTime ?? '21:30'}
               onChange={(v) => {
@@ -390,7 +374,7 @@ export default function HunterScreen() {
                 }}
               />
             ) : (
-              <SystemText variant="meta" style={styles.notConnected}>
+              <SystemText variant="meta">
                 Not connected yet — the planner needs its endpoint before it can run.
               </SystemText>
             )}
@@ -425,58 +409,69 @@ function Toggle({
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
+  // What the setting does stays folded until asked for: an info button at the
+  // end of the row, the way iOS lists put one beside a Wi-Fi network.
+  const [explain, setExplain] = useState(false);
   return (
-    // Role "button", not "switch": gesture-handler's Pressable only receives
-    // clicks on web when it renders as a real <button>. The on/off state is
-    // still announced through accessibilityState.
-    <Pressable
-      onPress={() => onChange(!value)}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ checked: value }}>
-      <View style={styles.toggleRow}>
-        <View style={styles.toggleText}>
-          <SystemText variant="title" style={styles.toggleLabel}>
-            {label}
-          </SystemText>
-          <SystemText variant="meta" style={styles.toggleHint}>
-            {hint}
-          </SystemText>
+    <View>
+      <View style={styles.toggleLine}>
+        {/* Role "button", not "switch": gesture-handler's Pressable only receives
+            clicks on web when it renders as a real <button>. The on/off state is
+            still announced through accessibilityState. */}
+        <Pressable
+          style={styles.toggleMain}
+          onPress={() => onChange(!value)}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityState={{ checked: value }}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleText}>
+              <SystemText variant="title" style={styles.toggleLabel}>
+                {label}
+              </SystemText>
+            </View>
+            <Animated.View
+              style={[
+                styles.track,
+                {
+                  backgroundColor: value ? palette.positive : alpha(palette.text, 0.16),
+                  transitionProperty: 'backgroundColor',
+                  transitionDuration: '180ms',
+                },
+              ]}>
+              <Animated.View
+                style={[
+                  styles.knob,
+                  {
+                    transform: [{ translateX: value ? 20 : 0 }],
+                    transitionProperty: 'transform',
+                    transitionDuration: '180ms',
+                    transitionTimingFunction: 'ease-out',
+                  },
+                ]}
+              />
+            </Animated.View>
+          </View>
+        </Pressable>
+        <View style={styles.infoButton}>
+          <InfoButton label={`What ${label} does`} open={explain} onToggle={() => setExplain((e) => !e)} />
         </View>
-        <Animated.View
-          style={[
-            styles.track,
-            {
-              backgroundColor: value ? palette.accent : alpha(palette.text, 0.16),
-              transitionProperty: 'backgroundColor',
-              transitionDuration: '180ms',
-            },
-          ]}>
-          <Animated.View
-            style={[
-              styles.knob,
-              {
-                transform: [{ translateX: value ? 20 : 0 }],
-                transitionProperty: 'transform',
-                transitionDuration: '180ms',
-                transitionTimingFunction: 'ease-out',
-              },
-            ]}
-          />
-        </Animated.View>
       </View>
-    </Pressable>
+      {explain ? (
+        <SystemText variant="meta" color={palette.text} style={styles.toggleHint}>
+          {hint}
+        </SystemText>
+      ) : null}
+    </View>
   );
 }
 
 function Record({
   label,
   value,
-  tint,
 }: {
   label: string;
   value: number | string;
-  tint: string;
 }) {
   return (
     <Card reveal raised style={styles.record} contentStyle={styles.recordInner}>
@@ -484,7 +479,7 @@ function Record({
       <Rolling
         text={typeof value === 'number' ? value.toLocaleString('en-US') : value}
         lineHeight={34}
-        color={tint}
+        color={palette.accentSoft}
         style={styles.recordValue}
       />
     </Card>
@@ -529,7 +524,7 @@ function AccountBlock() {
           Progress is saved on this device only. Signing in with Google would carry it to the
           browser too, but the System has no account server configured yet.
         </SystemText>
-        <SystemText variant="meta" style={styles.notConnected}>
+        <SystemText variant="meta">
           Not connected yet.
         </SystemText>
       </>
@@ -584,6 +579,30 @@ function AccountBlock() {
  * Fixed half-hours rather than a time picker: one press, no keyboard, nothing
  * to spin through at bedtime.
  */
+/**
+ * A section's title. What the section is for, when it needs saying, sits
+ * behind an info button beside the title, as on the dashboard panels, so the
+ * screen shows settings and figures, not paragraphs.
+ */
+function SectionTitle({ title, hint }: { title: string; hint?: string }) {
+  const [explain, setExplain] = useState(false);
+  return (
+    <View style={styles.sectionHead}>
+      <View style={styles.sectionTitleRow}>
+        <SystemText variant="title" style={[styles.sectionLabel, styles.labelInRow]}>
+          {title}
+        </SystemText>
+        {hint ? <InfoButton label={`About ${title}`} open={explain} onToggle={() => setExplain((e) => !e)} /> : null}
+      </View>
+      {hint && explain ? (
+        <SystemText variant="meta" color={palette.text} style={styles.sectionHint}>
+          {hint}
+        </SystemText>
+      ) : null}
+    </View>
+  );
+}
+
 const BRIEFING_TIMES = ['20:00', '20:30', '21:00', '21:30', '22:00', '22:30'] as const;
 
 function TimeChips({ value, onChange }: { value: string; onChange: (next: string) => void }) {
@@ -602,15 +621,14 @@ function TimeChips({ value, onChange }: { value: string; onChange: (next: string
               style={[
                 styles.chip,
                 {
-                  borderColor: on ? palette.accent : palette.borderStrong,
-                  backgroundColor: on ? alpha(palette.accent, 0.18) : 'transparent',
+                  backgroundColor: on ? alpha(palette.accent, 0.18) : alpha(palette.text, 0.06),
                   transitionProperty: 'backgroundColor',
                   transitionDuration: 160,
                 },
               ]}>
               <SystemText
                 variant="label"
-                color={on ? palette.accent : palette.textMuted}
+                color={on ? palette.text : palette.textMuted}
                 style={styles.chipText}>
                 {t}
               </SystemText>
@@ -662,7 +680,7 @@ function DangerButton({ onPress }: { onPress: () => void }) {
         style={[
           styles.reset,
           {
-            backgroundColor: pressed ? alpha(palette.negative, 0.24) : alpha(palette.negative, 0.12),
+            backgroundColor: pressed ? alpha(palette.negative, 0.24) : alpha(palette.negative, 0.14),
             transitionProperty: 'backgroundColor',
             transitionDuration: 120,
           },
@@ -682,7 +700,11 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.sm },
   labelInRow: { marginBottom: 0 },
   block: { marginBottom: space.xl },
-  blockSub: { fontSize: 13, lineHeight: 18, marginBottom: space.md },
+  // Only the reset warning uses this now: it must be read before the button, so it's text size, not small print.
+  blockSub: { fontSize: 15, lineHeight: 20, marginBottom: space.md },
+  sectionHead: { marginBottom: space.sm, marginLeft: 2, gap: space.xs },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  sectionHint: { marginRight: space.lg },
 
   activityInner: { padding: space.lg },
 
@@ -694,12 +716,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    paddingVertical: 2,
+    // 5 above and below the 34pt figure: a 44pt row to tap.
+    paddingVertical: 5,
     paddingHorizontal: space.sm,
     borderRadius: radius.sm,
   },
   ratingDivider: { borderTopWidth: 1, borderTopColor: palette.border },
-  ratingGlyph: { width: 18, fontSize: 14 },
+  ratingDot: { width: 8, height: 8, borderRadius: 4, marginHorizontal: 5 },
   ratingName: { flex: 1, fontSize: 15 },
   // The signature: big figures, hard right.
   ratingValue: { fontSize: 28, lineHeight: 34, textAlign: 'right' },
@@ -711,7 +734,7 @@ const styles = StyleSheet.create({
 
   catList: { gap: space.md },
   catRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  catGlyph: { width: 14, fontSize: 11 },
+  catDot: { width: 7, height: 7, borderRadius: 4, marginHorizontal: 3 },
   catName: { width: 52, fontSize: 10 },
   catTrack: {
     flex: 1,
@@ -726,16 +749,15 @@ const styles = StyleSheet.create({
   accountSpacer: { height: space.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
   chip: {
-    borderWidth: 1,
+    minHeight: HIT,
+    justifyContent: 'center',
     borderRadius: radius.pill,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
   chipText: { fontSize: 10, letterSpacing: 1.2 },
-  notConnected: { fontSize: 11, lineHeight: 16 },
   ghost: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
+    backgroundColor: alpha(palette.text, 0.08),
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
@@ -745,16 +767,17 @@ const styles = StyleSheet.create({
   },
 
   ghostLabel: { fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingVertical: space.sm },
+  toggleLine: { flexDirection: 'row', alignItems: 'center' },
+  toggleMain: { flex: 1 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg, minHeight: HIT },
   toggleText: { flex: 1, minWidth: 0 },
   toggleLabel: { fontSize: 15 },
-  toggleHint: { fontSize: 11, marginTop: 1 },
+  infoButton: { width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center', marginRight: -space.sm },
+  toggleHint: { marginBottom: space.sm, marginRight: space.xl },
   toggleDivider: { height: 1, backgroundColor: palette.border, marginVertical: space.sm },
   track: { width: 44, height: 24, borderRadius: 12, padding: 2, justifyContent: 'center' },
   knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: palette.bg },
   reset: {
-    borderWidth: 1,
-    borderColor: alpha(palette.negative, 0.5),
     borderRadius: radius.pill,
     alignItems: 'center',
     paddingVertical: space.md,

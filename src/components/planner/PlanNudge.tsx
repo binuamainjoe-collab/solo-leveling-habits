@@ -48,9 +48,6 @@ export function PlanNudge() {
   return (
     <Animated.View entering={FadeIn.duration(260)} exiting={FadeOut.duration(180)} style={styles.card}>
       <View style={styles.text}>
-        <SystemText variant="label" color={palette.textMuted} style={styles.kicker}>
-          Planner
-        </SystemText>
         <SystemText variant="title" style={styles.title}>
           Plan {day}?
         </SystemText>
@@ -67,7 +64,7 @@ export function PlanNudge() {
           accessibilityRole="button"
           accessibilityLabel={`Plan ${day}`}>
           <View style={styles.go}>
-            <SystemText variant="body" color={palette.bg} style={styles.goLabel}>
+            <SystemText variant="body" color={palette.text} style={styles.goLabel}>
               Plan it
             </SystemText>
           </View>
@@ -97,20 +94,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.lg,
     backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.22),
     borderRadius: radius.xl,
     padding: space.lg,
     marginBottom: space.lg,
   },
   text: { flex: 1, minWidth: 220, gap: 2 },
-  kicker: { color: palette.accentSoft },
   title: { fontSize: 20, lineHeight: 25 },
   body: { color: palette.textMuted },
   actions: { flexDirection: 'row', gap: space.sm },
   go: {
     minHeight: HIT,
-    backgroundColor: palette.accent,
+    backgroundColor: alpha(palette.text, 0.08),
     borderRadius: radius.pill,
     paddingHorizontal: space.xl,
     justifyContent: 'center',

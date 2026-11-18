@@ -18,17 +18,22 @@ import { playSound } from '@/lib/feedback';
 // setup task, reached from a button on the Quests screen, whereas a
 // long-term goal has to be visible every day or it quietly stops existing.
 //
+// On a phone the bar leaves a slot at its right end where Beerus parks
+// (src/components/assistant/SystemAssistant.tsx), the way iOS sets one round
+// button beside the tab bar, so he never floats over the page.
+const DOCK = 60 + space.lg + space.sm;
+
 // The Planner sits next to Quests because they are two views of the same day:
 // what you do, and when. Cards and Trophies share Collection to make room —
 // both are things earned, neither is something you act on daily.
 const TABS = [
   { name: 'index', label: 'Quests', icon: 'quests' },
   { name: 'planner', label: 'Planner', icon: 'planner' },
-  // The goal keeps the System's own mark, drawn as text like the ◆ button.
-  { name: 'goal', label: 'Goal', mark: '◆' },
+  // The goal keeps the System's own mark, drawn as text like the other tabs.
+  { name: 'goal', label: 'Goal', icon: 'goal' },
   { name: 'collection', label: 'Collection', icon: 'collection' },
   { name: 'hunter', label: 'Status', icon: 'status' },
-] as const satisfies readonly ({ name: string; label: string } & ({ icon: IconName } | { mark: string }))[];
+] as const satisfies readonly { name: string; label: string; icon: IconName }[];
 
 /** How far the bar slides down when it tucks: the labels leave, the icons stay. */
 const TUCK = 18;
@@ -91,7 +96,7 @@ function SystemTabBar({ state, navigation }: TabBarProps) {
 
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.xs) }, barStyle]}>
-      <View style={[styles.barInner, wide && styles.barInnerWide]}>
+      <View style={[styles.barInner, wide ? styles.barInnerWide : { paddingRight: DOCK }]}>
         {tabWidth > 0 ? (
           <Animated.View pointerEvents="none" style={[styles.underline, { width: tabWidth }, underlineStyle]}>
             <View style={styles.indicator} />
@@ -148,13 +153,7 @@ function TabFace({ meta, slot }: { meta: (typeof TABS)[number]; slot: number }) 
 
   const face = (tint: string) => (
     <>
-      {'icon' in meta ? (
-        <Icon name={meta.icon} size={icon.tab} color={tint} />
-      ) : (
-        <SystemText variant="title" color={tint} style={styles.mark}>
-          {meta.mark}
-        </SystemText>
-      )}
+      <Icon name={meta.icon} size={icon.tab} color={tint} />
       <Animated.View style={labelStyle}>
         <SystemText variant="meta" color={tint} numberOfLines={1} style={styles.label}>
           {meta.label}
@@ -191,8 +190,6 @@ const styles = StyleSheet.create({
   tabLayer: { alignItems: 'center', gap: 2 },
   tabLit: { ...StyleSheet.absoluteFill, alignItems: 'center', gap: 2 },
   underline: { position: 'absolute', top: 0, left: 0, height: 2, alignItems: 'center' },
-  // ◆ set to the same 25pt box as the symbols beside it.
-  mark: { fontSize: 22, lineHeight: 25, height: 25, textAlign: 'center' },
   indicator: { height: 2, width: '40%', borderRadius: 1, backgroundColor: palette.accent },
   label: { fontSize: 11, fontWeight: '500', textAlign: 'center' },
 });

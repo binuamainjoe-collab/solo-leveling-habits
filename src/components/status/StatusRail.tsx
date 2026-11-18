@@ -136,7 +136,7 @@ export function StatusRail({
             onPress={() => onJump(i)}
             accessibilityRole="button"
             accessibilityLabel={`Go to ${chapters[i].label}`}
-            hitSlop={8}
+            hitSlop={15}
             style={[styles.tickHit, { top: `${t * 100}%` }]}>
             <View
               style={[

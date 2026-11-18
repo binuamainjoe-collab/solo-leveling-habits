@@ -104,6 +104,8 @@ export function SystemAssistant() {
   const { ready, onboarded, state } = useProgress();
   const segments = useSegments() as string[];
   const insets = useSafeAreaInsets();
+  // A phone: Beerus parks in the tab bar's row. Wider screens have the room to keep him floating.
+  const docked = useWindowDimensions().width < WIDE;
   const [open, setOpen] = useState(false);
   // Tapped: a chat. Held until the ring fills: straight into a live call.
   const [fabMode, setFabMode] = useState<AssistantMode>('chat');
@@ -145,7 +147,12 @@ export function SystemAssistant() {
     <>
       {onTabs ? (
         <FloatingOrb
-          bottom={insets.bottom + 76}
+          // On a phone he parks in the tab bar's row, beside the tabs, so he
+          // never sits over the page (the bar leaves him that slot). The bar
+          // row is 49 tall above the home indicator; he's centred on it, a
+          // few points proud of its top edge like a docked action button.
+          bottom={docked ? Math.max(2, Math.max(insets.bottom, space.xs) + (49 - 60) / 2) : insets.bottom + 76}
+          edgeBottom={insets.bottom + 76}
           top={insets.top + space.sm}
           hidden={flying}
           label={`${cue ? 'Talk to Beerus. Tomorrow has no plan yet' : 'Talk to Beerus'}${canHoldForLive ? '. Hold for five seconds to start a live call' : ''}`}

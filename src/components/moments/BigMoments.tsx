@@ -3,7 +3,8 @@ import { StyleSheet } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { LevelUp, RankUp, StarBorn } from '@/components/moments/Ceremonies';
+import { RankUp, StarBorn } from '@/components/moments/Ceremonies';
+import { Release } from '@/components/moments/Release';
 import { setCeremony, useFocusOpen, useLaunchSettled } from '@/components/moments/stage';
 import { hurryDock, useAirborne, useHeldWhileFlying } from '@/components/motion/flight';
 import { SystemText } from '@/components/system/SystemText';
@@ -12,7 +13,7 @@ import { highest, momentsBetween, sameMarks, type Marks, type Moment } from '@/l
 import { useDayStats, useProgress } from '@/store/progress';
 import { storage } from '@/store/storage';
 
-type Queued = Moment & { id: number; fromRatio: number };
+type Queued = Moment & { id: number };
 
 /** Test copies only: a button that previews each ceremony, since a fresh profile can't reach a rank. */
 const DEMO = process.env.EXPO_PUBLIC_BEERUS_DEMO === '1';
@@ -51,7 +52,6 @@ export function BigMoments() {
   const heldInto = useHeldWhileFlying(into, 'ring');
   const heldNeed = useHeldWhileFlying(need, 'ring');
   const now: Marks = { level: heldLevel, rank: heldRank, perfect: heldPerfect };
-  const ratio = heldInto / Math.max(1, heldNeed);
 
   const key = `system.marks.${accountId ?? 'local'}`;
   const latest = useRef(now);
@@ -72,9 +72,6 @@ export function BigMoments() {
     };
   }, [key, ready, onboarded]);
 
-  // Where the ring stood before a level was crossed, so the ceremony fills from there.
-  const [before, setBefore] = useState({ level: heldLevel, ratio });
-
   const [queue, setQueue] = useState<Queued[]>([]);
   // How many moments have been queued, so each gets its own id.
   const [made, setMade] = useState(0);
@@ -84,15 +81,12 @@ export function BigMoments() {
       const found = momentsBetween(seen.marks, now).map((m, i) => ({
         ...m,
         id: made + i + 1,
-        fromRatio: m.kind === 'level' && before.level === m.from ? before.ratio : 0.5,
       }));
       setQueue([...queue, ...found]);
       setMade(made + found.length);
       setSeen({ key, marks: next });
     }
   }
-  // Read above before it moves on, so a crossing fills from the old level's place.
-  if (before.level !== heldLevel || before.ratio !== ratio) setBefore({ level: heldLevel, ratio });
 
   useEffect(() => {
     if (seen) void storage.set(seen.key, JSON.stringify(seen.marks)).catch(() => {});
@@ -114,10 +108,10 @@ export function BigMoments() {
     const up = RANKS[Math.min(RANKS.length - 1, RANKS.indexOf(heldRank) + 1)];
     const moment: Queued =
       kind === 'level'
-        ? { kind, from: heldLevel, to: heldLevel + 1, id, fromRatio: 0.62 }
+        ? { kind, from: heldLevel, to: heldLevel + 1, id }
         : kind === 'rank'
-          ? { kind, from: heldRank === 'S' ? 'A' : heldRank, to: up, level: heldLevel, id, fromRatio: 0 }
-          : { kind, count: heldPerfect + 1, id, fromRatio: 0 };
+          ? { kind, from: heldRank === 'S' ? 'A' : heldRank, to: up, level: heldLevel, id }
+          : { kind, count: heldPerfect + 1, id };
     setQueue((q) => [...q, moment]);
   };
 
@@ -135,7 +129,7 @@ export function BigMoments() {
 
   if (current.kind === 'rank') return <RankUp key={current.id} from={current.from} to={current.to} level={current.level} onDone={done} />;
   if (current.kind === 'level')
-    return <LevelUp key={current.id} from={current.from} to={current.to} fromRatio={current.fromRatio} into={heldInto} need={heldNeed} onDone={done} />;
+    return <Release key={current.id} from={current.from} to={current.to} into={heldInto} need={heldNeed} onDone={done} />;
   return <StarBorn key={current.id} count={current.count} onDone={done} />;
 }
 

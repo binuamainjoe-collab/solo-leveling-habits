@@ -4,7 +4,7 @@ import { Pressable } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, palette, radius, space } from '@/constants/theme';
 import { MODEL_CHOICES, MODEL_ROLES, pickedModel, type ModelPicks, type ModelRole } from '@/data/models';
 import { playSound } from '@/lib/feedback';
 import { loadModelPicks, saveModelPicks } from '@/lib/modelSettings';
@@ -86,14 +86,13 @@ export function ModelPicker() {
                       style={[
                         styles.chip,
                         {
-                          borderColor: on ? palette.accent : palette.borderStrong,
-                          backgroundColor: on ? alpha(palette.accent, 0.18) : 'transparent',
+                          backgroundColor: on ? alpha(palette.accent, 0.18) : alpha(palette.text, 0.06),
                           opacity: picks ? 1 : 0.5,
                           transitionProperty: 'backgroundColor',
                           transitionDuration: 160,
                         },
                       ]}>
-                      <SystemText variant="label" color={on ? palette.accent : palette.textMuted} style={styles.chipText}>
+                      <SystemText variant="label" color={on ? palette.text : palette.textMuted} style={styles.chipText}>
                         {o.label}
                       </SystemText>
                     </Animated.View>
@@ -122,14 +121,13 @@ const styles = StyleSheet.create({
   about: { fontSize: 12, lineHeight: 17, marginTop: 2, marginBottom: space.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.sm },
   chip: {
-    borderWidth: 1,
     borderRadius: radius.pill,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
-    minHeight: 36,
+    minHeight: HIT,
     justifyContent: 'center',
   },
   chipText: { fontSize: 10, letterSpacing: 1.2 },
-  note: { fontSize: 11, lineHeight: 16 },
-  failed: { fontSize: 11, lineHeight: 16, marginTop: space.md },
+  note: { lineHeight: 18 },
+  failed: { lineHeight: 18, marginTop: space.md },
 });

@@ -311,9 +311,6 @@ export default function PlannerChatScreen() {
           </View>
         </Pressable>
         <View style={styles.headerText}>
-          <SystemText variant="label" color={palette.textMuted} style={styles.headerKicker}>
-            Planning
-          </SystemText>
           <SystemText variant="title" numberOfLines={1} style={styles.headerTitle}>
             {date === today ? 'Today' : weekday}
             <SystemText variant="meta" style={styles.headerDate}>
@@ -426,9 +423,6 @@ function SealedCard({
   const tasks = draft.blocks.filter((b) => b.kind === 'task').length;
   return (
     <Animated.View entering={FadeInDown.duration(320)} style={styles.sealed}>
-      <SystemText variant="label" color={palette.positive} style={styles.sealedKicker}>
-        ◆ PLAN SEALED
-      </SystemText>
       <SystemText variant="hero" style={styles.sealedTitle}>
         {day.toUpperCase()} IS SET
       </SystemText>
@@ -474,7 +468,6 @@ const styles = StyleSheet.create({
   },
   back: { width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, minWidth: 0 },
-  headerKicker: { fontSize: 9, letterSpacing: 2 },
   headerTitle: { fontSize: 17, lineHeight: 21 },
   headerDate: { fontSize: 12, color: palette.textMuted },
   sealButton: {
@@ -492,8 +485,6 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     marginLeft: space.lg,
     backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.border,
     borderRadius: radius.lg,
     padding: space.md,
     gap: space.sm,
@@ -503,16 +494,13 @@ const styles = StyleSheet.create({
   draftIssues: { fontSize: 11, color: palette.gold, marginTop: 2 },
 
   sealed: {
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: alpha(palette.positive, 0.35),
+    backgroundColor: alpha(palette.accent, 0.14),
     borderRadius: radius.lg,
     padding: space.lg,
     gap: space.xs,
   },
-  sealedKicker: { fontSize: 10, letterSpacing: 2.4 },
   sealedTitle: { fontSize: 30, lineHeight: 34 },
-  sealedBody: { fontSize: 13, lineHeight: 19, color: palette.textMuted },
+  sealedBody: { fontSize: 15, lineHeight: 20, color: palette.textMuted },
   sealedXp: { fontSize: 26, lineHeight: 32, marginTop: space.xs },
   viewButton: {
     backgroundColor: palette.accent,

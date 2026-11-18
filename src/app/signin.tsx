@@ -88,9 +88,6 @@ export default function SignInScreen() {
   return (
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <SystemText variant="label" color={palette.accent} style={styles.kicker}>
-          ◆ System access ◆
-        </SystemText>
         <SystemText variant="hero" style={styles.title}>
           LINK ACCOUNT
         </SystemText>
@@ -276,7 +273,6 @@ function ActionButton({
 
 const styles = StyleSheet.create({
   scroll: { paddingBottom: space.xxl * 2, gap: space.md },
-  kicker: { fontSize: 10, letterSpacing: 3 },
   title: { fontSize: 32, marginTop: space.xs },
   sub: { fontSize: 14, lineHeight: 20, marginBottom: space.sm },
   sectionLabel: { marginBottom: space.sm, marginLeft: 2, color: palette.textMuted },

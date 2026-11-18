@@ -16,13 +16,19 @@ interface Props {
   children: ReactNode;
   /** Background illustration. Sits under a scrim so text stays readable. */
   art?: ImageSourcePropType;
-  /** Tints the border and fill — used for achievement tiers, as Life Reset
+  /** Tints the fill — used for achievement tiers, as Life Reset
    *  tints its whole Gold rank card. */
   tint?: string;
   /** Lighter surface for boxes nested inside another card. */
   raised?: boolean;
   /** 0–1. How hard the scrim bites; raise it when text runs long. */
   scrim?: number;
+  /**
+   * Where the words sit over the art. `left` (default) darkens a column on
+   * the left; `bottom` lets the art show clear at the top and fades to dark
+   * under the words at the bottom, the way a poster tile does.
+   */
+  scrimFrom?: 'left' | 'bottom';
   /** Rise into view with the scroll. For cards that sit directly on a screen. */
   reveal?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -35,17 +41,19 @@ function CardBase({
   tint,
   raised,
   scrim = 0.86,
+  scrimFrom = 'left',
   reveal,
   style,
   contentStyle,
 }: Props) {
+  const bottom = scrimFrom === 'bottom';
   return (
     <View
       {...(reveal ? revealProps() : null)}
       style={[
         styles.root,
         raised && styles.raised,
-        tint ? { borderColor: alpha(tint, 0.42), backgroundColor: alpha(tint, 0.07) } : null,
+        tint ? { backgroundColor: alpha(tint, 0.1) } : null,
         style,
       ]}>
       {art ? (
@@ -55,17 +63,17 @@ function CardBase({
               left-heavy gradient so the copy column stays legible while the
               art breathes on the right. */}
           <View
-            style={[StyleSheet.absoluteFill, { backgroundColor: alpha(palette.bg, 0.34) }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: alpha(palette.bg, bottom ? 0.18 : 0.34) }]}
           />
           <LinearGradient
-            colors={[
-              alpha(palette.bg, scrim),
-              alpha(palette.bg, scrim * 0.72),
-              alpha(palette.bg, 0.06),
-            ]}
-            locations={[0, 0.52, 1]}
+            colors={
+              bottom
+                ? [alpha(palette.bg, 0.05), alpha(palette.bg, scrim * 0.7), alpha(palette.bg, scrim)]
+                : [alpha(palette.bg, scrim), alpha(palette.bg, scrim * 0.72), alpha(palette.bg, 0.06)]
+            }
+            locations={bottom ? [0, 0.45, 1] : [0, 0.52, 1]}
             start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
+            end={bottom ? { x: 0, y: 1 } : { x: 1, y: 0 }}
             style={StyleSheet.absoluteFill}
           />
         </View>
@@ -77,11 +85,13 @@ function CardBase({
 }
 
 const styles = StyleSheet.create({
+  // No outline: a card is told apart from the page by its surface, and a
+  // tinted card by its tint.
   root: {
     backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: 'transparent',
     // Clips the artwork to the rounded corners.
     overflow: 'hidden',
   },

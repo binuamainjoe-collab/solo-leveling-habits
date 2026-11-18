@@ -385,7 +385,7 @@ export default function GoalScreen() {
         ) : !goal ? (
           <Animated.View entering={FadeIn.duration(260)} style={styles.first}>
             <SystemText variant="title">Name one thing you are working towards.</SystemText>
-            <SystemText variant="meta">The planner and the shadows work around it.</SystemText>
+            <SystemText variant="body">The planner and the shadows work around it.</SystemText>
             {addForm}
           </Animated.View>
         ) : (
@@ -576,7 +576,7 @@ export default function GoalScreen() {
         header={
           sheet?.kind === 'agent' ? (
             <View style={styles.agentHead}>
-              <View style={[styles.agentIconBig, { borderColor: alpha(rankMeta[sheet.agent.rank].color, 0.6) }]}>
+              <View style={[styles.agentIconBig, { backgroundColor: alpha(rankMeta[sheet.agent.rank].color, 0.18) }]}>
                 <Icon name={AGENT_ICON[sheet.agent.id] ?? 'radar'} size={26} color={rankMeta[sheet.agent.rank].color} />
               </View>
               <View style={styles.flex}>
@@ -727,7 +727,7 @@ function AgentButton({ agent, status, onPress }: { agent: AgentDef; status: Agen
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${agent.name}, ${agent.role}: ${status.label}. Open`}>
       <View style={styles.agent}>
-        <View style={[styles.agentIcon, { borderColor: alpha(rank, 0.55), backgroundColor: alpha(rank, 0.08) }]}>
+        <View style={[styles.agentIcon, { backgroundColor: alpha(rank, 0.18) }]}>
           {status.working ? (
             <ActivityIndicator color={rank} />
           ) : (
@@ -775,6 +775,7 @@ function FindingRow({ finding, disabled, onToggle }: { finding: Finding; disable
       <Pressable
         onPress={onToggle}
         disabled={disabled}
+        hitSlop={8}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: done, disabled }}
         accessibilityLabel={done ? `Mark ${finding.title} unread` : `Mark ${finding.title} read${award ? `, plus ${award} XP` : ''}`}>
@@ -826,7 +827,7 @@ function SeeAll({ label, onPress }: { label: string; onPress: () => void }) {
 
 function Banner({ tone, text, onClose }: { tone: string; text: string; onClose?: () => void }) {
   return (
-    <Animated.View entering={FadeIn.duration(200)} style={[styles.banner, { borderColor: alpha(tone, 0.4), backgroundColor: alpha(tone, 0.07) }]}>
+    <Animated.View entering={FadeIn.duration(200)} style={[styles.banner, { backgroundColor: alpha(tone, 0.12) }]}>
       <SystemText variant="meta" color={palette.text} style={styles.flex}>
         {text}
       </SystemText>
@@ -885,7 +886,7 @@ function ActionButton({
         style={[
           styles.action,
           primary ? styles.actionPrimary : styles.actionGhost,
-          warn && { borderColor: alpha(palette.negative, 0.6) },
+          warn && { backgroundColor: alpha(palette.negative, 0.14) },
           disabled && styles.off,
         ]}>
         {busy ? <ActivityIndicator size="small" color={tone} /> : null}
@@ -909,9 +910,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.lg,
     padding: space.xl,
-    borderRadius: radius.xl + 4,
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.18),
+    borderRadius: radius.xl,
     backgroundColor: palette.surface,
   },
   heroWide: { flexDirection: 'row', alignItems: 'center' },
@@ -932,9 +931,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: palette.borderStrong,
+    backgroundColor: palette.surfaceRaised,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -945,7 +942,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -960,14 +956,12 @@ const styles = StyleSheet.create({
     borderColor: palette.bg,
   },
   agentHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  agentIconBig: { width: 56, height: 56, borderRadius: 28, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  agentIconBig: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
 
   section: {
     gap: space.sm,
     padding: space.lg,
     borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: palette.border,
     backgroundColor: palette.surface,
   },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.xs },
@@ -989,10 +983,10 @@ const styles = StyleSheet.create({
   checkOn: { backgroundColor: palette.positive, borderColor: palette.positive },
   forget: { width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
   seeAll: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: HIT, alignSelf: 'flex-start' },
-  banner: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderWidth: 1, borderRadius: radius.lg, paddingLeft: space.md },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: space.sm, borderRadius: radius.lg, paddingLeft: space.md },
 
   tiles: { flexDirection: 'row', gap: space.sm },
-  tile: { flex: 1, padding: space.md, borderRadius: radius.lg, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
+  tile: { flex: 1, padding: space.md, borderRadius: radius.lg, backgroundColor: palette.surface },
   tileValue: { fontSize: 28, lineHeight: 34 },
 
   goalSheet: { gap: space.md },
@@ -1029,6 +1023,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xl,
   },
   actionPrimary: { backgroundColor: palette.accent },
-  actionGhost: { borderWidth: 1, borderColor: palette.borderStrong },
+  actionGhost: { backgroundColor: alpha(palette.text, 0.08) },
   off: { opacity: 0.4 },
 });

@@ -103,7 +103,7 @@ function SectionHead({ period, plan }: { period: Period; plan: DraftPlan }) {
   return (
     <View style={styles.sectionHead}>
       <SystemText variant="label" color={palette.textMuted} style={styles.sectionLabel}>
-        {PERIOD_LABEL[period].toUpperCase()}
+        {PERIOD_LABEL[period]}
       </SystemText>
       <View style={styles.hairline} />
       <SystemText variant="label" color={palette.textFaint} style={styles.sectionRange}>
@@ -238,14 +238,14 @@ function KindTag({ block, done }: { block: PlanBlock; done: boolean }) {
   if (block.kind === 'fixed') {
     return (
       <SystemText variant="label" color={palette.textFaint} style={styles.tag}>
-        FIXED
+        Fixed
       </SystemText>
     );
   }
   if (block.kind === 'habit') {
     return (
       <SystemText variant="label" color={palette.violet} style={styles.tag}>
-        DAILY
+        Daily
       </SystemText>
     );
   }
@@ -253,7 +253,7 @@ function KindTag({ block, done }: { block: PlanBlock; done: boolean }) {
     return (
       <View style={styles.priority}>
         <SystemText variant="label" color={palette.gold} style={styles.tag}>
-          PRIORITY
+          Priority
         </SystemText>
       </View>
     );
@@ -261,7 +261,7 @@ function KindTag({ block, done }: { block: PlanBlock; done: boolean }) {
   if (block.priority === 'low') {
     return (
       <SystemText variant="label" color={palette.textFaint} style={styles.tag}>
-        OPTIONAL
+        Optional
       </SystemText>
     );
   }
@@ -289,7 +289,7 @@ function CompactTimeline({ plan }: { plan: DraftPlan }) {
         g.blocks.length === 0 ? null : (
           <View key={g.period} style={styles.compactGroup}>
             <SystemText variant="label" color={palette.textFaint} style={styles.compactPeriod}>
-              {PERIOD_LABEL[g.period].toUpperCase()}
+              {PERIOD_LABEL[g.period]}
             </SystemText>
             {g.blocks.map((b) => (
               <View key={b.id} style={styles.compactRow}>
@@ -311,13 +311,9 @@ function CompactTimeline({ plan }: { plan: DraftPlan }) {
                       : b.title}
                 </SystemText>
                 {b.kind === 'task' && b.priority === 'high' ? (
-                  <SystemText variant="label" color={palette.gold} style={styles.compactTag}>
-                    ◆
-                  </SystemText>
+                  <View style={[styles.compactTag, { backgroundColor: palette.accent }]} />
                 ) : b.kind === 'habit' ? (
-                  <SystemText variant="label" color={palette.violet} style={styles.compactTag}>
-                    ◇
-                  </SystemText>
+                  <View style={[styles.compactTag, { backgroundColor: palette.textMuted }]} />
                 ) : null}
               </View>
             ))}
@@ -360,7 +356,7 @@ const styles = StyleSheet.create({
 
   section: { gap: space.sm },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: 2 },
-  sectionLabel: { fontSize: 10, letterSpacing: 2.4 },
+  sectionLabel: { fontSize: 11 },
   sectionRange: { fontSize: 9, letterSpacing: 0.6 },
   hairline: { flex: 1, height: 1, backgroundColor: palette.border },
   free: { fontSize: 12, color: palette.textFaint, paddingLeft: TIME_COL + RAIL_COL + space.sm },
@@ -376,15 +372,15 @@ const styles = StyleSheet.create({
 
   bodyCol: { flex: 1, paddingLeft: space.sm, paddingBottom: space.sm },
   card: { borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.sm + 2, gap: 3 },
-  cardFilled: { backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
-  cardFixed: { backgroundColor: 'transparent', borderWidth: 1, borderColor: palette.border, borderStyle: 'dashed' },
-  cardCurrent: { borderColor: alpha(palette.accent, 0.6), borderStyle: 'solid' },
+  cardFilled: { backgroundColor: palette.surface },
+  cardFixed: { backgroundColor: palette.surfaceRaised },
+  cardCurrent: { backgroundColor: alpha(palette.accent, 0.14) },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
   title: { flex: 1, fontSize: 15, lineHeight: 19 },
   titleDone: { textDecorationLine: 'line-through' },
   focus: { fontSize: 12, lineHeight: 16, color: palette.textMuted, marginTop: 2 },
   cardMeta: { fontSize: 11, color: palette.textMuted },
-  tag: { fontSize: 8, letterSpacing: 1.4, marginTop: 4 },
+  tag: { fontSize: 10, marginTop: 4 },
   // The same check symbol as a finished quest card, so "done" looks one way.
   doneTag: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 },
   priority: {},
@@ -399,10 +395,10 @@ const styles = StyleSheet.create({
 
   compact: { gap: space.sm },
   compactGroup: { gap: 3 },
-  compactPeriod: { fontSize: 8, letterSpacing: 1.8, marginBottom: 1 },
+  compactPeriod: { fontSize: 10, marginBottom: 1 },
   compactRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   compactTime: { width: 38, fontSize: 11, color: palette.textMuted },
   compactTitle: { flex: 1, fontSize: 13, lineHeight: 17 },
   compactBreak: { fontStyle: 'italic', color: palette.textFaint, fontSize: 11 },
-  compactTag: { fontSize: 10 },
+  compactTag: { width: 6, height: 6, borderRadius: 3 },
 });

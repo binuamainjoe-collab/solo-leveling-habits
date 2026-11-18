@@ -5,14 +5,13 @@ import Animated, { FadeOut } from 'react-native-reanimated';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { Ring } from '@/components/charts/Ring';
 import { RankSeal } from '@/components/moments/RankSeal';
 import { Sparks } from '@/components/moments/Sparks';
 import { Rolling } from '@/components/motion/Rolling';
 import { Scramble } from '@/components/motion/Scramble';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, gradient, palette, rankMeta, space, type Rank } from '@/constants/theme';
-import { levelUpSound, rankUpSound } from '@/lib/ceremonySound';
+import { alpha, palette, rankMeta, space, type Rank } from '@/constants/theme';
+import { rankUpSound } from '@/lib/ceremonySound';
 import { haptic } from '@/lib/feedback';
 import { skyFor, starAt } from '@/lib/moments';
 
@@ -42,7 +41,7 @@ function Bloom({ size, tint, peak, tag }: { size: number; tint: string; peak: nu
 }
 
 /** Steps through a ceremony: each entry is when its phase begins, in ms. */
-function usePhases(times: number[]): number {
+export function usePhases(times: number[]): number {
   const [phase, setPhase] = useState(0);
   const plan = useRef(times);
   useEffect(() => {
@@ -57,7 +56,7 @@ function usePhases(times: number[]): number {
  * anywhere to move on, and an end of its own after `duration`, so a moment
  * never holds you. It leaves with a short fade, quieter than it came.
  */
-function Stage({
+export function Stage({
   duration,
   onDone,
   label,
@@ -96,7 +95,7 @@ function Stage({
  * Words that arrive partway through. They hold their place from the start,
  * unseen, so the seal or ring above doesn't jump when they come in.
  */
-function Later({ on, style, children }: { on: boolean; style?: object; children: ReactNode }) {
+export function Later({ on, style, children }: { on: boolean; style?: object; children: ReactNode }) {
   return (
     <View {...(on ? cue('rise') : {})} aria-hidden={!on} style={[style, !on && styles.waiting]}>
       {children}
@@ -104,7 +103,7 @@ function Later({ on, style, children }: { on: boolean; style?: object; children:
   );
 }
 
-function Hint({ show }: { show: boolean }) {
+export function Hint({ show }: { show: boolean }) {
   return show ? (
     <View {...cue('in')} style={styles.hint}>
       <SystemText variant="meta" color={palette.textFaint}>
@@ -112,66 +111,6 @@ function Hint({ show }: { show: boolean }) {
       </SystemText>
     </View>
   ) : null;
-}
-
-/**
- * A level. The ring fills from where you were to the top, and at the top it
- * flashes, sparks fly and the number rolls over; then it settles on the new
- * level and what the next one costs, which is how the moment ends.
- */
-export function LevelUp({
-  from,
-  to,
-  fromRatio,
-  into,
-  need,
-  onDone,
-}: {
-  from: number;
-  to: number;
-  fromRatio: number;
-  into: number;
-  need: number;
-  onDone: () => void;
-}) {
-  const PEAK = 620;
-  const phase = usePhases([60, PEAK, 900, 1300]);
-  useEffect(() => levelUpSound(PEAK), []);
-  useEffect(() => {
-    if (phase === 2) haptic('success');
-  }, [phase]);
-  const ring = phase >= 2 ? into / Math.max(1, need) : phase >= 1 ? 1 : fromRatio;
-
-  return (
-    <Stage duration={2600} onDone={onDone} label={`Level up. Level ${to}`}>
-      <Sparks duration={2400} bursts={[{ at: PEAK, x: 0.5, y: 0.42, count: 40, power: 1.1 }]} />
-      <View style={styles.centre} pointerEvents="none">
-        <View {...cue('rise')}>
-          <Scramble variant="label" color={palette.accentSoft} style={styles.kicker}>
-            LEVEL UP
-          </Scramble>
-        </View>
-        <View style={styles.ringBox}>
-          {/* A solid face, so nothing on the board reads through behind the number. */}
-          <View style={styles.ringDisc} />
-          {phase >= 2 ? <Bloom size={300} tint={palette.accentSoft} peak={0.9} tag={cue('flash')} /> : null}
-          {/* A fresh ring for the new level, so it starts low instead of draining back. */}
-          <Ring key={phase >= 2 ? 'next' : 'this'} size={208} stroke={16} ratio={ring} colors={[gradient.ember[0], gradient.ember[2]]} depth />
-          {/* Outside the ring, so the number rolls over instead of starting again with it. */}
-          <View style={styles.ringFace}>
-            <SystemText variant="meta">Level</SystemText>
-            <Rolling text={String(phase >= 2 ? to : from)} lineHeight={78} style={styles.bigNumber} />
-          </View>
-        </View>
-        <Later on={phase >= 3} style={styles.after}>
-          <SystemText variant="title" color={palette.text}>
-            {(need - into).toLocaleString('en-US')} XP to level {to + 1}
-          </SystemText>
-        </Later>
-      </View>
-      <Hint show={phase >= 4} />
-    </Stage>
-  );
 }
 
 /**
@@ -318,11 +257,7 @@ const styles = StyleSheet.create({
   centre: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', gap: space.lg, paddingHorizontal: space.xl },
   low: { justifyContent: 'flex-end', paddingBottom: '22%' },
   kicker: { letterSpacing: 3, fontSize: 13 },
-  ringBox: { alignItems: 'center', justifyContent: 'center' },
-  ringFace: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
-  ringDisc: { position: 'absolute', width: 184, height: 184, borderRadius: 92, backgroundColor: palette.bg },
   sealBox: { width: 220, height: 220, alignItems: 'center', justifyContent: 'center' },
-  bigNumber: { fontSize: 64, lineHeight: 78 },
   after: { alignItems: 'center' },
   waiting: { opacity: 0 },
   centred: { textAlign: 'center' },

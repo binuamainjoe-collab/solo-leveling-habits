@@ -44,6 +44,7 @@ function rememberSpot(x: number, y: number) {
  */
 export function FloatingOrb({
   bottom,
+  edgeBottom,
   top,
   label,
   onPress,
@@ -51,8 +52,14 @@ export function FloatingOrb({
   hidden = false,
   children,
 }: {
-  /** Clear space to keep at the bottom, above the tab bar. */
+  /** Clear space at the bottom for his home spot, bottom right. */
   bottom: number;
+  /**
+   * Clear space at the bottom anywhere else. On a phone his home is parked
+   * in the tab bar's row, beside the tabs; dragged to the left edge he must
+   * stay above the bar, or he would sit on the first tab.
+   */
+  edgeBottom?: number;
   top: number;
   label: string;
   onPress: () => void;
@@ -65,6 +72,7 @@ export function FloatingOrb({
   const margin = space.lg;
   const rightEdge = width - SIZE - margin;
   const lowest = height - bottom - SIZE;
+  const lowestLeft = height - (edgeBottom ?? bottom) - SIZE;
 
   const x = useSharedValue(home.x < 0 ? rightEdge : home.x);
   const y = useSharedValue(home.y < 0 ? lowest : home.y);
@@ -89,11 +97,11 @@ export function FloatingOrb({
   // A new window size can leave him off screen.
   useEffect(() => {
     const nx = clamp(home.x < 0 ? rightEdge : home.x, margin, rightEdge);
-    const ny = clamp(home.y < 0 ? lowest : home.y, top, lowest);
+    const ny = clamp(home.y < 0 ? lowest : home.y, top, nx < rightEdge ? lowestLeft : lowest);
     rememberSpot(nx, ny);
     x.set(withSpring(nx, SPRING.settle));
     y.set(withSpring(ny, SPRING.settle));
-  }, [rightEdge, lowest, margin, top, x, y]);
+  }, [rightEdge, lowest, lowestLeft, margin, top, x, y]);
 
   // Where he is right now, summons included, for the window to fly him from.
   useEffect(() => {
@@ -127,7 +135,7 @@ export function FloatingOrb({
         held.set(withSpring(0, SPRING.settle));
         const landX = x.get() + project(e.velocityX);
         const targetX = landX + SIZE / 2 < width / 2 ? margin : rightEdge;
-        const targetY = clamp(y.get() + project(e.velocityY), top, lowest);
+        const targetY = clamp(y.get() + project(e.velocityY), top, targetX === margin ? lowestLeft : lowest);
         x.set(withSpring(targetX, { ...SPRING.snap, velocity: e.velocityX }));
         y.set(withSpring(targetY, { ...SPRING.snap, velocity: e.velocityY }));
         scheduleOnRN(rememberSpot, targetX, targetY);
@@ -154,7 +162,7 @@ export function FloatingOrb({
         scheduleOnRN(endCharge);
       });
     return Gesture.Race(drag, hold, tap);
-  }, [beginCharge, endCharge, fullCharge, held, lowest, margin, onHold, onPress, rightEdge, startX, startY, top, width, x, y]);
+  }, [beginCharge, endCharge, fullCharge, held, lowest, lowestLeft, margin, onHold, onPress, rightEdge, startX, startY, top, width, x, y]);
 
   const style = useAnimatedStyle(() => {
     // Pulled for: he rises toward the top of the screen as the pull grows.

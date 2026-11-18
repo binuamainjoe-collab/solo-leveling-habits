@@ -5,7 +5,7 @@ import { duckMusic } from '@/lib/music';
 
 /**
  * The sound of a level and a rank, the only two moments that get one. Made
- * in the browser rather than shipped as files: a rising run of bell tones for
+ * in the browser rather than shipped as files: a rush and an impact for
  * a level, and for a rank a low strike as the old rank burns, then a chord as
  * the new one is forged.
  *
@@ -56,16 +56,70 @@ function master(a: AudioContext, level: number) {
   return out;
 }
 
-/** A level: four notes climbing to the octave, then a soft shimmer on top. */
-export function levelUpSound(delayMs = 0) {
+/**
+ * A level, as a Release: a rush of air that climbs as the hunter rises, cut
+ * off dead at `impactMs`, where a deep drop and a struck chord land together
+ * with the impact frame.
+ */
+export function releaseSound(impactMs: number) {
   const a = audio();
   if (!a || performance.now() < busyUntil) return;
-  busyUntil = performance.now() + delayMs + 1400;
-  duckMusic(delayMs + 1400);
-  const out = master(a, 0.22);
-  const t = a.currentTime + delayMs / 1000;
-  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(a, out, t + i * 0.075, f, 0.9 - i * 0.08, 0.5));
-  bell(a, out, t + 0.32, 1568, 1.1, 0.18);
+  busyUntil = performance.now() + impactMs + 1800;
+  duckMusic(impactMs + 1800);
+  const out = master(a, 0.24);
+  const start = a.currentTime;
+  const hit = start + impactMs / 1000;
+
+  const noise = (seconds: number) => {
+    const buf = a.createBuffer(1, Math.max(1, Math.floor(a.sampleRate * seconds)), a.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = a.createBufferSource();
+    src.buffer = buf;
+    return src;
+  };
+
+  // The rush: noise through a band that climbs, swelling until the impact.
+  const rush = noise(impactMs / 1000);
+  const band = a.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.4;
+  band.frequency.setValueAtTime(260, start);
+  band.frequency.exponentialRampToValueAtTime(5200, hit);
+  const rushGain = a.createGain();
+  rushGain.gain.setValueAtTime(0.0001, start);
+  rushGain.gain.exponentialRampToValueAtTime(0.5, hit - 0.03);
+  rushGain.gain.linearRampToValueAtTime(0.0001, hit);
+  rush.connect(band).connect(rushGain).connect(out);
+  rush.start(start);
+  rush.stop(hit + 0.01);
+
+  // The impact: a crack on top and a drop underneath.
+  const crack = noise(0.09);
+  const high = a.createBiquadFilter();
+  high.type = 'highpass';
+  high.frequency.value = 1800;
+  const crackGain = a.createGain();
+  crackGain.gain.setValueAtTime(0.7, hit);
+  crackGain.gain.exponentialRampToValueAtTime(0.0001, hit + 0.09);
+  crack.connect(high).connect(crackGain).connect(out);
+  crack.start(hit);
+  crack.stop(hit + 0.1);
+
+  const drop = a.createOscillator();
+  const dropGain = a.createGain();
+  drop.type = 'sine';
+  drop.frequency.setValueAtTime(140, hit);
+  drop.frequency.exponentialRampToValueAtTime(38, hit + 0.7);
+  dropGain.gain.setValueAtTime(0.0001, hit);
+  dropGain.gain.exponentialRampToValueAtTime(1, hit + 0.015);
+  dropGain.gain.exponentialRampToValueAtTime(0.0001, hit + 0.9);
+  drop.connect(dropGain).connect(out);
+  drop.start(hit);
+  drop.stop(hit + 0.95);
+
+  [392, 523.25, 659.25, 783.99].forEach((f, i) => bell(a, out, hit + 0.06 + i * 0.03, f, 1.5, 0.3));
+  bell(a, out, hit + 0.26, 1568, 1.3, 0.14);
 }
 
 /**

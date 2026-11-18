@@ -147,7 +147,7 @@ export function CardRevealOverlay({ card, onDismiss }: Props) {
         <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Add to collection" />
         <Animated.View pointerEvents="none" entering={FadeIn.delay(120).duration(360)}>
           <Scramble variant="label" color={rarity.color} style={styles.kicker}>
-            ◆ New card acquired ◆
+            New card acquired
           </Scramble>
         </Animated.View>
 

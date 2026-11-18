@@ -30,7 +30,8 @@ export const palette = {
   /** Warm cream, never #FFF. */
   text: '#F7ECDF',
   textMuted: '#A99887',
-  textFaint: '#6F6157',
+  /** Lifted from #6F6157 (3.0:1) to clear 4.5:1 on the card surface, so small print reads outdoors. */
+  textFaint: '#8E7E70',
 
   positive: '#9BD17E',
   negative: '#FF5C4D',
@@ -95,13 +96,16 @@ export function difficultyFor(rank: Rank): string {
 export const STATS = ['STR', 'AGI', 'VIT', 'INT', 'PER', 'SEN'] as const;
 export type StatKey = (typeof STATS)[number];
 
-export const statMeta: Record<StatKey, { label: string; color: string; glyph: string }> = {
-  STR: { label: 'Strength', color: palette.negative, glyph: '◆' },
-  AGI: { label: 'Agility', color: palette.positive, glyph: '◇' },
-  VIT: { label: 'Vitality', color: palette.accent, glyph: '⬢' },
-  INT: { label: 'Intelligence', color: palette.sky, glyph: '◈' },
-  PER: { label: 'Perception', color: palette.violet, glyph: '⬡' },
-  SEN: { label: 'Sense', color: palette.gold, glyph: '✦' },
+export const statMeta: Record<StatKey, { label: string; color: string }> = {
+  // Six shades of the same fire, so the crystal and the scores read as one
+  // ember object, not a rainbow: hot orange, amber, coal red, gold, copper,
+  // white-hot. Each stays far enough from its neighbours to tell apart.
+  STR: { label: 'Strength', color: '#FF7020' },
+  AGI: { label: 'Agility', color: '#FFB061' },
+  VIT: { label: 'Vitality', color: '#E2481A' },
+  INT: { label: 'Intelligence', color: '#F2B64A' },
+  PER: { label: 'Perception', color: '#D9895B' },
+  SEN: { label: 'Sense', color: '#FFDDB0' },
 };
 
 /* ------------------------------------------------------------- categories */
@@ -124,21 +128,21 @@ export type CategoryId = (typeof CATEGORIES)[number];
 
 export const categoryMeta: Record<
   CategoryId,
-  { label: string; short: string; color: string; glyph: string }
+  { label: string; short: string; color: string }
 > = {
-  body: { label: 'Physical Conditioning', short: 'BODY', color: palette.accent, glyph: '⚔' },
-  nutrition: { label: 'Nutrition & Fuel', short: 'FUEL', color: palette.positive, glyph: '⬢' },
-  mind: { label: 'Mental Fortitude', short: 'MIND', color: palette.sky, glyph: '◈' },
-  craft: { label: 'Skill & Craft', short: 'CRAFT', color: palette.violet, glyph: '✦' },
-  discipline: { label: 'Discipline & Restraint', short: 'WILL', color: palette.negative, glyph: '⛨' },
-  care: { label: 'Grooming & Recovery', short: 'CARE', color: palette.teal, glyph: '❖' },
-  social: { label: 'Social Bonds', short: 'BONDS', color: '#F7C66B', glyph: '◇' },
-  wealth: { label: 'Resource Management', short: 'GOLD', color: '#CFA068', glyph: '◆' },
+  body: { label: 'Physical Conditioning', short: 'BODY', color: palette.accent },
+  nutrition: { label: 'Nutrition & Fuel', short: 'FUEL', color: palette.positive },
+  mind: { label: 'Mental Fortitude', short: 'MIND', color: palette.sky },
+  craft: { label: 'Skill & Craft', short: 'CRAFT', color: palette.violet },
+  discipline: { label: 'Discipline & Restraint', short: 'WILL', color: palette.negative },
+  care: { label: 'Grooming & Recovery', short: 'CARE', color: palette.teal },
+  social: { label: 'Social Bonds', short: 'BONDS', color: '#F7C66B' },
+  wealth: { label: 'Resource Management', short: 'GOLD', color: '#CFA068' },
   // Deliberately a neutral platinum: tonight's plan should read as issued by
   // the System rather than belonging to any one discipline.
   // On the board this only ever shows the plan for the day being viewed —
   // which is today. "Tomorrow's Plan" was wrong on the one day it appeared.
-  planned: { label: "Today's Plan", short: 'PLAN', color: '#E3D3C2', glyph: '✧' },
+  planned: { label: "Today's Plan", short: 'PLAN', color: '#E3D3C2' },
 };
 
 /** The eight disciplines you can actually browse and accept quests from. */
@@ -148,8 +152,14 @@ export const BROWSABLE_CATEGORIES = CATEGORIES.filter((c) => c !== 'planned');
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
-/** Generous rounding is central to the look — nothing here is sharp. */
-export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
+/**
+ * Two corner sizes and a pill, nothing else: 22 for surfaces (cards, panels,
+ * sheets, tiles) and 12 for the small things inside them (buttons, cells,
+ * chips that aren't pills). Five sizes used side by side is what made the
+ * screens look assembled. `sm` and `lg` stay as names so nothing breaks; they
+ * point at the two sizes.
+ */
+export const radius = { sm: 12, md: 12, lg: 22, xl: 22, pill: 999 } as const;
 
 /**
  * Type follows Apple: one family — the platform's own (SF Pro on iPhone and

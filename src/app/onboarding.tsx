@@ -110,7 +110,6 @@ export default function OnboardingScreen() {
         <Animated.View key={current} entering={FadeInRight.duration(280)}>
           {current === 'name' ? (
             <Stepper
-              kicker="First — who are you?"
               title="THE SYSTEM NEEDS A NAME"
               blurb="This is what the System calls you. It stays on this device unless you sign in to sync.">
               <TextInput
@@ -129,7 +128,6 @@ export default function OnboardingScreen() {
 
           {current === 'age' ? (
             <Stepper
-              kicker="How old are you?"
               title="HUNTER REGISTRATION"
               blurb="Used only to pitch the plan sensibly. No other personal details are asked for.">
               {AGE_BANDS.map((b) => (
@@ -145,7 +143,6 @@ export default function OnboardingScreen() {
 
           {current === 'goals' ? (
             <Stepper
-              kicker="Pick up to four"
               title="WHAT ARE YOU HERE FOR?"
               blurb="Your quests are chosen from these. You can change them any time in the Archive.">
               {GOALS.map((g) => (
@@ -163,7 +160,6 @@ export default function OnboardingScreen() {
 
           {current === 'training' ? (
             <Stepper
-              kicker="Training"
               title="WHAT IS THE BODY FOR?"
               blurb="This decides which nutrition and lifting quests you get.">
               {TRAINING_MODES.map((t) => (
@@ -181,7 +177,6 @@ export default function OnboardingScreen() {
 
           {current === 'study' ? (
             <Stepper
-              kicker="Optional — pick what you'll actually use"
               title="HOW WILL YOU STUDY?"
               blurb="Ratings follow Dunlosky et al. (2013), which graded ten common study techniques against the evidence. Highlighting and rereading were rated low — they feel productive without building recall.">
               {STUDY_METHODS.map((m) => (
@@ -201,7 +196,6 @@ export default function OnboardingScreen() {
 
           {current === 'commitment' ? (
             <Stepper
-              kicker="Be honest"
               title="HOW HARD, DAY ONE?"
               blurb="Starting too big is the usual reason people quit in week two. You can raise this later.">
               {COMMITMENTS.map((c) => (
@@ -219,7 +213,6 @@ export default function OnboardingScreen() {
 
           {current === 'review' ? (
             <Stepper
-              kicker={`Welcome, ${draft.name}`}
               title="YOUR PLAN IS READY"
               blurb={describePlan(draft, plan)}>
               <Card style={styles.planCard} contentStyle={styles.planInner}>
@@ -285,21 +278,16 @@ export default function OnboardingScreen() {
 /* ------------------------------------------------------------ pieces */
 
 function Stepper({
-  kicker,
   title,
   blurb,
   children,
 }: {
-  kicker: string;
   title: string;
   blurb: string;
   children: React.ReactNode;
 }) {
   return (
     <View>
-      <SystemText variant="label" color={palette.accent} style={styles.kicker}>
-        {kicker}
-      </SystemText>
       <SystemText variant="hero" style={styles.title}>
         {title}
       </SystemText>
@@ -345,10 +333,9 @@ function Choice({
         style={[
           styles.choice,
           {
-            borderColor: selected ? palette.accent : palette.border,
-            backgroundColor: selected ? alpha(palette.accent, 0.12) : palette.surface,
-            transitionProperty: ['borderColor', 'backgroundColor'],
-            transitionDuration: ['160ms', '160ms'],
+            backgroundColor: selected ? alpha(palette.accent, 0.14) : palette.surface,
+            transitionProperty: ['backgroundColor'],
+            transitionDuration: ['160ms'],
           },
         ]}>
         <View style={styles.choiceHead}>
@@ -454,7 +441,6 @@ const styles = StyleSheet.create({
   meter: { flexDirection: 'row', gap: 3, marginBottom: space.xl },
   meterSeg: { flex: 1, height: 4, borderRadius: 2 },
   scroll: { paddingBottom: space.xl },
-  kicker: { fontSize: 10, letterSpacing: 2 },
   title: { fontSize: 30, lineHeight: 36, marginTop: space.xs },
   blurb: { fontSize: 14, lineHeight: 20, marginTop: space.sm },
   choices: { marginTop: space.xl, gap: space.md },
@@ -471,7 +457,7 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
   },
 
-  choice: { borderWidth: 1, borderRadius: radius.lg, padding: space.lg },
+  choice: { borderRadius: radius.lg, padding: space.lg },
   choiceHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   choiceGlyph: { fontSize: 20 },
   choiceText: { flex: 1, minWidth: 0 },

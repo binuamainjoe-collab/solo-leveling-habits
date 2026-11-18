@@ -110,6 +110,8 @@ export default function QuestBoardScreen() {
   // Enough weeks to fill the row: half a year on a desktop, two months on a phone.
   const weeks = useMemo(() => heatmap(log, state.date, wide ? 26 : 8), [log, state.date, wide]);
   const best = bestDay(trend);
+  // A new hunter has nothing to chart yet: the charts wait, dimmed, under one line on what fills them.
+  const fresh = trend.every((p) => p.cleared === 0);
 
   const plan = state.plans[state.date]?.timeline;
   const clock = clockNow(now);
@@ -182,6 +184,7 @@ export default function QuestBoardScreen() {
       day={{ done: doneCount, total }}
       onChange={(next) => setProgress(quest.id, next)}
       compact={!wide}
+      primary={step.kind === 'quest' && step.quest.id === quest.id}
     />
   );
 
@@ -325,10 +328,7 @@ export default function QuestBoardScreen() {
                     exiting={FadeOut.duration(180)}
                     collapsable={false}>
                     <View style={styles.groupHead}>
-                      {/* The category's own glyph is part of the game's art and stays. */}
-                      <SystemText variant="title" color={cat.color} style={styles.groupGlyph}>
-                        {cat.glyph}
-                      </SystemText>
+                      <View style={[styles.groupDot, { backgroundColor: cat.color }]} />
                       <SystemText variant="title" style={styles.groupTitle}>
                         {cat.label}
                       </SystemText>
@@ -373,8 +373,10 @@ export default function QuestBoardScreen() {
         </SystemText>
 
         <View style={[styles.row, wide && styles.rowWide]}>
-          <Panel iconName="bars" title="This week" sub="Pale bar: on the board. Ember: cleared." style={wide ? styles.colHalf : null}>
-            <WeekBars points={week} selected={selected} onSelect={setSelected} />
+          <Panel iconName="bars" title="This week" hint="Pale bar: on the board. Ember: cleared. Tap a day to read it." style={wide ? styles.colHalf : null}>
+            <FirstDays on={fresh} note="Clear a quest and today's bar starts to rise.">
+              <WeekBars points={week} selected={selected} onSelect={setSelected} />
+            </FirstDays>
           </Panel>
           <Panel
             iconName="trend"
@@ -395,7 +397,9 @@ export default function QuestBoardScreen() {
               />
             }
             style={wide ? styles.colHalf : null}>
-            <AreaTrend points={trend} selected={selected} onSelect={setSelected} />
+            <FirstDays on={fresh} note="Clear your first quest and this line starts climbing.">
+              <AreaTrend points={trend} selected={selected} onSelect={setSelected} />
+            </FirstDays>
             {best ? (
               <Pressable
                 onPress={() => {
@@ -418,9 +422,12 @@ export default function QuestBoardScreen() {
         <Panel
           iconName="calendar"
           title="Consistency"
-          sub={`The last ${weeks.length} weeks. Brighter means more of the day got done.`}
+          sub={`The last ${weeks.length} weeks`}
+          hint="Brighter means more of the day got done. Tap a square to read that day."
           style={styles.consistency}>
-          <HeatMap weeks={weeks} today={state.date} selected={selected} onSelect={setSelected} />
+          <FirstDays on={fresh} note="Every day you clear a quest lights a square here.">
+            <HeatMap weeks={weeks} today={state.date} selected={selected} onSelect={setSelected} />
+          </FirstDays>
         </Panel>
 
         {/* Archive gave up its tab slot to Goal, so this is the way in. It
@@ -469,6 +476,7 @@ function BoardCard({
   day,
   onChange,
   compact,
+  primary,
 }: {
   quest: QuestDef;
   value: number;
@@ -480,6 +488,8 @@ function BoardCard({
   /** Today's count so far, for the ring the card flies into. */
   day: { done: number; total: number };
   onChange: (next: number) => void;
+  /** The quest the hero puts forward: the only solid button on the board. */
+  primary: boolean;
 }) {
   const slot = useRef<View>(null);
   return (
@@ -497,6 +507,7 @@ function BoardCard({
           value={value}
           ceiling={isCeilingQuest(quest)}
           compact={compact}
+          primary={primary}
           onChange={(next) => {
             if (flies && !isComplete(quest, value) && isComplete(quest, next)) clearInto(slot.current, day.done, day.total);
             onChange(next);
@@ -581,23 +592,22 @@ function SwitchPill({
         style={[
           styles.pill,
           {
-            backgroundColor: selected ? tint : alpha(palette.text, 0.04),
-            borderColor: selected ? tint : palette.border,
+            backgroundColor: selected ? palette.surfaceHover : alpha(palette.text, 0.04),
             transform: [{ scale: pulse ? 1.07 : 1 }],
-            transitionProperty: ['backgroundColor', 'borderColor', 'transform'],
-            transitionDuration: ['180ms', '180ms', '200ms'],
-            transitionTimingFunction: ['ease-out', 'ease-out', 'ease-out'],
+            transitionProperty: ['backgroundColor', 'transform'],
+            transitionDuration: ['180ms', '200ms'],
+            transitionTimingFunction: ['ease-out', 'ease-out'],
           },
         ]}>
-        <SystemText variant="title" color={selected ? palette.bg : palette.textMuted} style={styles.pillLabel}>
+        <SystemText variant="title" color={selected ? palette.text : palette.textMuted} style={styles.pillLabel}>
           {label}
         </SystemText>
         <View
           style={[
             styles.pillCount,
-            { backgroundColor: selected ? alpha(palette.bg, 0.22) : alpha(tint, 0.16) },
+            { backgroundColor: alpha(tint, selected ? 0.24 : 0.16) },
           ]}>
-          <SystemText variant="label" color={selected ? palette.bg : tint} style={styles.pillCountText}>
+          <SystemText variant="label" color={tint} style={styles.pillCountText}>
             {count}
           </SystemText>
         </View>
@@ -649,12 +659,33 @@ function UpNext({ blocks, wake, now, onOpen }: { blocks: PlanBlock[]; wake: stri
 function readout(rec: { cleared: number; total: number; perfect: boolean } | undefined, date: string, today: string): string {
   const day = date === today ? 'Today' : prettyDate(date);
   if (date > today) return `${day} has not happened yet.`;
-  if (!rec || rec.total === 0) return `${day}: nothing was on the board. Tap any day in the charts to read it.`;
+  if (!rec || rec.total === 0) return `${day}: nothing was on the board.`;
   const pct = Math.round((rec.cleared / rec.total) * 100);
-  return `${day}: ${rec.cleared} of ${rec.total} cleared (${pct}%)${rec.perfect ? ', a perfect day' : ''}. Tap any day in the charts to read it.`;
+  return `${day}: ${rec.cleared} of ${rec.total} cleared (${pct}%)${rec.perfect ? ', a perfect day' : ''}.`;
 }
 
 /** An empty panel says what it is for and offers the one action that fills it. */
+/**
+ * A chart with nothing in it yet, on a hunter's first days: the chart stays
+ * in place but steps back, and one line says what will fill it, so the
+ * screen reads as a beginning and not as something broken.
+ */
+function FirstDays({ on, note, children }: { on: boolean; note: string; children: ReactNode }) {
+  if (!on) return <>{children}</>;
+  return (
+    <View>
+      <View style={styles.firstChart} pointerEvents="none" aria-hidden>
+        {children}
+      </View>
+      <View style={styles.firstNote} pointerEvents="none">
+        <SystemText variant="body" color={palette.text} style={styles.firstText}>
+          {note}
+        </SystemText>
+      </View>
+    </View>
+  );
+}
+
 function EmptyAction({
   strip,
   body,
@@ -681,7 +712,7 @@ function EmptyAction({
         accessibilityRole="button"
         accessibilityLabel={action}>
         <View style={styles.emptyButton}>
-          <SystemText variant="body" color={palette.bg} style={styles.filterText}>
+          <SystemText variant="body" color={palette.text} style={styles.filterText}>
             {action}
           </SystemText>
         </View>
@@ -711,6 +742,9 @@ function EmptyPage({ tint, title, body, seal }: { tint: string; title: string; b
 }
 
 const styles = StyleSheet.create({
+  firstChart: { opacity: 0.28 },
+  firstNote: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xl },
+  firstText: { textAlign: 'center', fontWeight: '600', textShadowColor: palette.bg, textShadowRadius: 12 },
   scroll: { paddingBottom: space.xxl * 3 },
   row: { gap: space.lg, marginBottom: space.lg },
   rowWide: { flexDirection: 'row', alignItems: 'stretch' },
@@ -752,7 +786,7 @@ const styles = StyleSheet.create({
     minHeight: HIT,
     paddingHorizontal: space.xl,
     borderRadius: radius.pill,
-    backgroundColor: palette.accent,
+    backgroundColor: alpha(palette.text, 0.08),
     justifyContent: 'center',
   },
 
@@ -776,9 +810,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
-    borderWidth: 1,
+    minHeight: HIT,
     borderRadius: radius.pill,
-    // 12 + a 20pt line = Apple's 44pt target.
     paddingVertical: 12,
   },
   pillLabel: { fontSize: 15 },
@@ -798,7 +831,7 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginBottom: space.md,
   },
-  groupGlyph: { fontSize: 17 },
+  groupDot: { width: 8, height: 8, borderRadius: 4 },
   groupTitle: { flex: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
 

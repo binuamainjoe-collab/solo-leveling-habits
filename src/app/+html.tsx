@@ -32,6 +32,12 @@ html {
 body { overscroll-behavior: none; background: ${palette.bg}; }
 /* Clips burst effects and the like, which would otherwise widen a phone's page. */
 #root { overflow: clip; }
+/* The level-up Release (src/components/moments/Release.tsx), at rest. These
+   are the states anyone with motion turned down sees: no speed lines, no
+   inverted frame, no ring; the hunter, the word and the level stand still. */
+[data-rel="lines"], [data-rel="impact"], [data-rel="wave"], [data-rel="aura"] { opacity: 0; }
+[data-rel="impact"] { background: #fff; mix-blend-mode: difference; }
+[data-rel-glow] { filter: drop-shadow(0 0 10px rgba(255, 112, 32, 0.6)) drop-shadow(0 0 28px rgba(201, 62, 22, 0.45)); }
 button, a, [role="button"], [role="tab"] {
   touch-action: manipulation;
   user-select: none;
@@ -155,6 +161,71 @@ button, a, [role="button"], [role="tab"] {
   [data-cer="wave"] { animation: cer-wave 640ms cubic-bezier(0.23, 1, 0.32, 1) both; }
   [data-cer="shake"] { animation: cer-shake 300ms linear both; }
   [data-cer="ignite"] { animation: cer-ignite 560ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+
+  /* The level-up Release: anime transformation grammar. Bars slam in, the
+     hunter rises, speed lines boil (hand-drawn lines swap on 4s, like
+     animation drawn on twos), then one impact frame: two frames inverted,
+     a shake that dies away, the word slammed in letter by letter. One flash,
+     well under three a second. Everything ends at rest; nothing loops. */
+  @keyframes rel-bar-top-in { from { transform: translateY(-100%); } to { transform: none; } }
+  @keyframes rel-bar-bottom-in { from { transform: translateY(100%); } to { transform: none; } }
+  @keyframes rel-bar-top-out { to { transform: translateY(-100%); } }
+  @keyframes rel-bar-bottom-out { to { transform: translateY(100%); } }
+  @keyframes rel-hunter {
+    from { opacity: 0; transform: translateY(48px) scale(0.92); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes rel-glow { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+  @keyframes rel-lines {
+    0% { opacity: 0; transform: scale(1.3); }
+    14% { opacity: 1; transform: none; }
+    62% { opacity: 1; transform: scale(0.94); }
+    100% { opacity: 0; transform: scale(0.94); }
+  }
+  @keyframes rel-boil-a { 0%, 24.9% { opacity: 1; } 25%, 49.9% { opacity: 0; } 50%, 74.9% { opacity: 1; } 75%, 100% { opacity: 0; } }
+  @keyframes rel-boil-b { 0%, 24.9% { opacity: 0; } 25%, 49.9% { opacity: 1; } 50%, 74.9% { opacity: 0; } 75%, 100% { opacity: 1; } }
+  @keyframes rel-impact { 0%, 49.9% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes rel-shake {
+    0%, 100% { transform: none; }
+    10% { transform: translate(-10px, 6px) rotate(-0.6deg); }
+    25% { transform: translate(8px, -5px) rotate(0.5deg); }
+    40% { transform: translate(-5px, 3px) rotate(-0.3deg); }
+    60% { transform: translate(3px, -2px); }
+    80% { transform: translate(-1px, 1px); }
+  }
+  @keyframes rel-slam {
+    0% { opacity: 0; transform: scale(2.4) translateY(-8px); filter: blur(6px) brightness(2); }
+    60% { opacity: 1; transform: scale(0.94); filter: blur(0) brightness(1.3); }
+    100% { opacity: 1; transform: none; filter: none; }
+  }
+  @keyframes rel-aura { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.22); } }
+  @keyframes rel-wave { from { opacity: 0.9; transform: scale(0.3); } to { opacity: 0; transform: scale(3.2); } }
+  @keyframes rel-stamp {
+    0% { opacity: 0; transform: scale(1.7) rotate(-5deg); }
+    55% { opacity: 1; transform: scale(0.96) rotate(1deg); }
+    100% { opacity: 1; transform: none; }
+  }
+  [data-rel="bar-top-in"] { animation: rel-bar-top-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  [data-rel="bar-bottom-in"] { animation: rel-bar-bottom-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  [data-rel="bar-top-out"] { animation: rel-bar-top-out 360ms cubic-bezier(0.77, 0, 0.175, 1) both; }
+  [data-rel="bar-bottom-out"] { animation: rel-bar-bottom-out 360ms cubic-bezier(0.77, 0, 0.175, 1) both; }
+  [data-rel="hunter"] { animation: rel-hunter 760ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both; }
+  [data-rel="glow"] { animation: rel-glow 1000ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  [data-rel="lines"] { animation: rel-lines 1300ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  [data-rel="boil-a"] { animation: rel-boil-a 360ms steps(1) 3 both; }
+  [data-rel="boil-b"] { animation: rel-boil-b 360ms steps(1) 3 both; }
+  [data-rel="impact"] { animation: rel-impact 80ms steps(1) both; }
+  [data-rel="shake"] { animation: rel-shake 440ms linear both; }
+  [data-rel="letter"] { animation: rel-slam 360ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  [data-rel="letter"][data-i="1"] { animation-delay: 26ms; }
+  [data-rel="letter"][data-i="2"] { animation-delay: 52ms; }
+  [data-rel="letter"][data-i="3"] { animation-delay: 78ms; }
+  [data-rel="letter"][data-i="4"] { animation-delay: 104ms; }
+  [data-rel="letter"][data-i="5"] { animation-delay: 130ms; }
+  [data-rel="letter"][data-i="6"] { animation-delay: 156ms; }
+  [data-rel="aura"] { animation: rel-aura 620ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  [data-rel="wave"] { animation: rel-wave 760ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  [data-rel="stamp"] { animation: rel-stamp 420ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
   /* A boss Gate (src/components/moments/FocusGate.tsx), on the browser's own
      view transition. Going in, the new view opens through a ring that grows

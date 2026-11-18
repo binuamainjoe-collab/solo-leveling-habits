@@ -50,7 +50,7 @@ function SystemTextBase({ variant = 'body', color, glow, style, ...rest }: Props
   const face = DISPLAY.has(variant) && !own.fontFamily ? { fontFamily: faceFor(flat.fontWeight), fontWeight: 'normal' as const } : null;
   // Section headings brighten as they arrive, like the rest of the page.
   const arrive = variant === 'heading' ? { dataSet: { reveal: 'head' } } : null;
-  return <Text maxFontSizeMultiplier={1.6} {...arrive} {...rest} style={[flat, face, resolveType(styles[variant], own)]} />;
+  return <Text maxFontSizeMultiplier={1.6} {...arrive} {...rest} style={[flat, face, resolveType(styles[variant], own, variant === 'numeral')]} />;
 }
 
 const DISPLAY = new Set<TextVariant>(['hero', 'heading', 'title', 'numeral']);
@@ -71,9 +71,10 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
     color: palette.text,
   },
+  // Section titles: one clear step under the page title (34), one over a card title (17).
   heading: {
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: weight.bold,
     color: palette.text,
   },

@@ -186,7 +186,7 @@ export function MonthCalendar({ view = 'calendar' }: { view?: 'calendar' | 'city
                 detailQuests.map(({ quest }) => (
                   <View key={quest.id} style={styles.detailChip}>
                     <SystemText variant="label" color={categoryMeta[quest.category].color}>
-                      {quest.glyph} {quest.title}
+                      {quest.title}
                     </SystemText>
                   </View>
                 ))
@@ -224,6 +224,7 @@ function NavButton({ glyph, hint, onPress }: { glyph: 'back' | 'chevron'; hint: 
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={4}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
       accessibilityRole="button"
@@ -287,7 +288,7 @@ const styles = StyleSheet.create({
   cell: { width: `${100 / 7}%`, alignItems: 'center', paddingVertical: 3 },
   day: {
     width: 30,
-    height: 30,
+    minHeight: HIT,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -306,8 +307,7 @@ const styles = StyleSheet.create({
   detailHead: { flexDirection: 'row', justifyContent: 'space-between', gap: space.sm },
   detailList: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: space.sm },
   detailChip: {
-    borderWidth: 1,
-    borderColor: palette.border,
+    backgroundColor: alpha(palette.text, 0.06),
     borderRadius: radius.pill,
     paddingHorizontal: 8,
     paddingVertical: 3,

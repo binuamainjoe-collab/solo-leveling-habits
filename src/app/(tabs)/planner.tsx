@@ -5,6 +5,7 @@ import { Pressable } from 'react-native-gesture-handler';
 import { MotionScroll } from '@/components/motion/MotionScroll';
 import Animated, { FadeIn, ReduceMotion, useSharedValue, withSpring } from 'react-native-reanimated';
 
+import { DayStrip } from '@/components/charts/DayStrip';
 import { DayClock, PART_META, type ClockIcon } from '@/components/charts/DayClock';
 import { Ring } from '@/components/charts/Ring';
 import { DayWeekZoom } from '@/components/planner/DayWeekZoom';
@@ -12,12 +13,13 @@ import { Timeline, formatMinutes, type LiveTimeline } from '@/components/planner
 import { WeekView, weekAnchor, type WeekDay } from '@/components/planner/WeekView';
 import { QuestIcon } from '@/components/quest/QuestIcon';
 import { Card } from '@/components/system/Card';
+import { Icon } from '@/components/system/Icon';
 import { Pressable as SafePressable } from '@/components/system/Pressable';
 import { Screen, useContentWidth } from '@/components/system/Screen';
 import { Segmented } from '@/components/system/Segmented';
 import { WordReveal } from '@/components/motion/WordReveal';
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, categoryMeta, HIT, palette, radius, space } from '@/constants/theme';
+import { alpha, categoryMeta, HIT, icon, palette, radius, space } from '@/constants/theme';
 import { blockIsDone } from '@/data/assistant';
 import { firstFreeTime, nudge, overlap, partAt, partsOf, placeQuests, spanOf, weekOf, type Part, type Slots } from '@/data/dayClock';
 import {
@@ -100,6 +102,8 @@ export default function PlannerScreen() {
   const [picked, setPicked] = useState<string | null>(null);
   /** The week, flat, in the clock's place: pinch the clock, or the Week button. 0 is the day, 1 the week. */
   const [week, setWeek] = useState(false);
+  /** The how-to text stays folded away until asked for. */
+  const [help, setHelp] = useState(false);
   const zoom = useSharedValue(0);
 
   const [session, setSession] = useState<PlannerSession | null>(null);
@@ -251,9 +255,6 @@ export default function PlannerScreen() {
   return (
     <Screen>
       <MotionScroll showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <SystemText variant="label" color={palette.textMuted}>
-          Planner
-        </SystemText>
         <WordReveal screen="planner" variant="hero" style={styles.hero}>
           {weekdayOf(date)}
         </WordReveal>
@@ -340,7 +341,7 @@ export default function PlannerScreen() {
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}
                     accessibilityLabel={`${meta.label}, ${fromMinutes(p.from)} to ${fromMinutes(p.to)}: ${formatMinutes(p.planned)} planned, ${p.doneCount} of ${p.count} quests done. ${on ? 'Show the whole day' : 'Show only this part'}`}>
-                    <View style={[styles.part, on && { borderColor: meta.color, backgroundColor: alpha(meta.color, 0.08) }]}>
+                    <View style={[styles.part, on && { backgroundColor: alpha(meta.color, 0.12) }]}>
                       <View style={[styles.partDot, { backgroundColor: meta.color }]} />
                       <View style={styles.partText}>
                         <View style={styles.partHead}>
@@ -395,13 +396,25 @@ export default function PlannerScreen() {
               />
             ) : (
               <View style={styles.hint}>
-                <SystemText variant="meta">
-                  {week
-                    ? 'Tap today or tomorrow to open it on the clock, or spread two fingers on the week.'
-                    : quests.length
-                      ? 'Tap a quest’s icon on the clock to see it and log it. Inside the ring: the ones with no set time. Hold one to carry it onto the ring and give it a time. Pinch the clock to see the week.'
-                      : 'No quests on the board. Add some from the Archive.'}
-                </SystemText>
+                <Pressable
+                  onPress={() => setHelp((h) => !h)}
+                  accessibilityRole="button"
+                  accessibilityLabel="How it works"
+                  accessibilityState={{ expanded: help }}>
+                  <View style={styles.helpRow}>
+                    <Icon name="info" size={icon.small} color={palette.textMuted} />
+                    <SystemText variant="meta">How it works</SystemText>
+                  </View>
+                </Pressable>
+                {help ? (
+                  <SystemText variant="meta">
+                    {week
+                      ? 'Tap today or tomorrow to open it on the clock, or spread two fingers on the week.'
+                      : quests.length
+                        ? 'Tap a quest’s icon on the clock to see it and log it. Inside the ring: the ones with no set time. Hold one to carry it onto the ring and give it a time. Pinch the clock to see the week.'
+                        : 'No quests on the board. Add some from the Archive.'}
+                  </SystemText>
+                ) : null}
               </View>
             )}
 
@@ -440,6 +453,7 @@ export default function PlannerScreen() {
           </View>
         ) : plannerConfigured() ? (
           <Animated.View key={`empty-${date}`} entering={FadeIn.duration(220)} style={styles.empty}>
+            <DayStrip blocks={[]} wake={wake} sleep={sleep} now={minute} onOpen={openChat} />
             {stored ? (
               // A plan from the first planner, which had no times.
               <SystemText variant="body" style={styles.cardBody}>
@@ -503,7 +517,7 @@ function PickedQuest({
   const step = quest.step ?? 1;
   const ratio = Math.min(1, value / Math.max(1, quest.target));
   return (
-    <Animated.View entering={FadeIn.duration(180)} style={[styles.picked, { borderColor: alpha(color, 0.45) }]}>
+    <Animated.View entering={FadeIn.duration(180)} style={styles.picked}>
       <View style={styles.pickedHead}>
         <Ring size={48} stroke={4} ratio={done ? 1 : ratio} color={color}>
           <QuestIcon name={questIconKey(quest)} size={20} color={color} />
@@ -607,8 +621,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: palette.border,
     backgroundColor: palette.surface,
   },
   partDot: { width: 12, height: 12, borderRadius: 6 },
@@ -622,9 +634,9 @@ const styles = StyleSheet.create({
   partNumLabel: { fontSize: 11 },
 
   hint: { paddingHorizontal: space.xs },
+  helpRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: HIT },
   picked: {
-    borderWidth: 1,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     backgroundColor: palette.surface,
     padding: space.lg,
     gap: space.md,
@@ -656,8 +668,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   ghost: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
+    backgroundColor: alpha(palette.text, 0.08),
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',

@@ -102,6 +102,14 @@ export function TodayHero({
     };
   }, [caught]);
   const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + 0.07 * caught.get() }] }));
+
+  // On a phone the greeting takes the full width over the ring, so it reads
+  // on one or two lines instead of breaking word by word beside it.
+  const hello = (
+    <WordReveal screen="today" variant="hero" style={[styles.greeting, compact && styles.greetingCompact]}>
+      {greeting}
+    </WordReveal>
+  );
   const flashStyle = useAnimatedStyle(() => ({ opacity: caught.get() }));
 
   return (
@@ -119,11 +127,10 @@ export function TodayHero({
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroGlow)" />
       </Svg>
 
+      {compact ? hello : null}
       <View style={styles.top}>
         <View style={styles.headline}>
-          <WordReveal screen="today" variant="hero" style={[styles.greeting, compact && styles.greetingCompact]}>
-            {greeting}
-          </WordReveal>
+          {compact ? null : hello}
           <SystemText variant="body" color={palette.text} style={styles.status}>
             {total === 0
               ? 'Nothing on the board yet.'
@@ -177,6 +184,8 @@ export function TodayHero({
               <Pressable
                 key={p.date}
                 disabled={p.future}
+                // The dot stays small; the finger gets the full 44 points.
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                 onPress={() => {
                   playSound('tap');
                   onSelectDay(p.date);
@@ -207,7 +216,7 @@ export function TodayHero({
           <SystemText variant="title" color={streak > 0 ? palette.accentSoft : palette.textMuted}>
             {streak > 0 ? `${streak}-day streak` : 'No streak yet'}
           </SystemText>
-          <SystemText variant="meta">{streak > 0 ? 'Clear one quest a day to keep it.' : 'Clear one quest today to start one.'}</SystemText>
+          {streak > 0 ? null : <SystemText variant="meta">Clear one quest today to start one.</SystemText>}
         </View>
       </View>
     </View>
@@ -258,18 +267,18 @@ function NextCard({
   return (
     <View ref={nextRef} collapsable={false} style={styles.next}>
       <View style={styles.nextText}>
-        <View style={styles.nextKicker}>
-          <Icon name="bolt" size={icon.small} color={palette.accentSoft} />
-          <SystemText variant="meta" color={palette.accentSoft} style={styles.bold}>
-            {kicker}
-          </SystemText>
-        </View>
-        <SystemText variant="title" numberOfLines={2}>
+        <SystemText variant="title" numberOfLines={2} style={styles.nextTitle}>
           {title}
         </SystemText>
-        <SystemText variant="meta" numberOfLines={1}>
-          {detail}
-        </SystemText>
+        <View style={styles.nextMeta}>
+          <Icon name="bolt" size={icon.small} color={palette.accentSoft} />
+          <SystemText variant="meta" numberOfLines={1} style={styles.nextMetaText}>
+            <SystemText variant="meta" color={palette.accentSoft} style={styles.bold}>
+              {kicker}
+            </SystemText>
+            {detail ? ` · ${detail}` : ''}
+          </SystemText>
+        </View>
       </View>
       <View style={styles.nextButtons}>
         {action ? (
@@ -306,11 +315,10 @@ function NextCard({
 }
 
 const styles = StyleSheet.create({
+  // No outline: the glow and the surface carry it.
   hero: {
     backgroundColor: alpha(palette.surface, SURFACE_ALPHA),
-    borderRadius: radius.xl + 4,
-    borderWidth: 1,
-    borderColor: alpha(palette.accent, 0.18),
+    borderRadius: radius.xl,
     padding: space.xl,
     gap: space.lg,
     overflow: 'hidden',
@@ -330,16 +338,18 @@ const styles = StyleSheet.create({
   // The ring flashes as a quest lands in it.
   flash: { ...StyleSheet.absoluteFill, boxShadow: `0px 0px 28px 6px ${alpha(palette.accent, 0.55)}` },
 
+  // The next step is part of the hero, not a box inside it: a hairline above
+  // is all that sets it apart.
   next: {
-    backgroundColor: alpha(palette.bg, 0.55),
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: space.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.borderStrong,
+    paddingTop: space.lg,
     gap: space.md,
   },
-  nextText: { gap: 2 },
-  nextKicker: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  nextText: { gap: 4 },
+  nextTitle: { fontSize: 20, lineHeight: 25 },
+  nextMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  nextMetaText: { flexShrink: 1 },
   nextButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   primary: {
     minHeight: HIT,
@@ -361,9 +371,9 @@ const styles = StyleSheet.create({
   flames: { flexDirection: 'row', gap: 6 },
   flameCol: { alignItems: 'center', gap: 4 },
   flame: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: alpha(palette.text, 0.05),

@@ -6,10 +6,7 @@ import { TrophiesPanel } from '@/components/collection/TrophiesPanel';
 import { Screen } from '@/components/system/Screen';
 import { Segmented } from '@/components/system/Segmented';
 import { WordReveal } from '@/components/motion/WordReveal';
-import { SystemText } from '@/components/system/SystemText';
 import { palette, space } from '@/constants/theme';
-import { CARDS } from '@/data/cards';
-import { ACHIEVEMENTS } from '@/data/achievements';
 import { useProgress } from '@/store/progress';
 
 type View_ = 'cards' | 'trophies';
@@ -27,8 +24,8 @@ export default function CollectionScreen() {
 
   return (
     <Screen>
-      <WordReveal screen="collection" variant="heading" style={styles.heading}>
-        COLLECTION
+      <WordReveal screen="collection" variant="hero" style={styles.heading}>
+        Collection
       </WordReveal>
 
       <View style={styles.switch}>
@@ -41,11 +38,6 @@ export default function CollectionScreen() {
           onChange={setView}
           tint={view === 'cards' ? palette.accent : palette.gold}
         />
-        <SystemText variant="meta" style={styles.of}>
-          {view === 'cards'
-            ? `${state.cards.length} of ${CARDS.length} cards collected`
-            : `${state.unlocked.length} of ${ACHIEVEMENTS.length} trophies unlocked`}
-        </SystemText>
       </View>
 
       {view === 'cards' ? <CardsPanel /> : <TrophiesPanel />}
@@ -54,7 +46,6 @@ export default function CollectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  heading: { fontSize: 30, letterSpacing: -0.5, marginBottom: space.md },
+  heading: { marginBottom: space.md },
   switch: { gap: space.sm, marginBottom: space.lg },
-  of: { fontSize: 11, textAlign: 'center', color: palette.textFaint },
 });

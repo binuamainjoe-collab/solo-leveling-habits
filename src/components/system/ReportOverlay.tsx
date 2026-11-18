@@ -3,7 +3,6 @@ import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Card } from '@/components/system/Card';
-import { Scramble } from '@/components/motion/Scramble';
 import { SystemText } from '@/components/system/SystemText';
 import { alpha, palette, radius, space } from '@/constants/theme';
 import { isFallback, type Report } from '@/data/agents';
@@ -35,9 +34,6 @@ export function ReportOverlay({ report, onClose }: { report: Report; onClose: ()
       <Animated.View entering={FadeInDown.duration(260)} style={styles.panelWrap} pointerEvents="box-none">
         <Card raised style={styles.panel} contentStyle={styles.panelInner}>
           <View style={styles.head}>
-            <Scramble variant="label" color={palette.accent} style={styles.kicker}>
-              {"Steward's reading"}
-            </Scramble>
             <SystemText variant="label" color={palette.textMuted} style={styles.date}>
               {report.date}
             </SystemText>
@@ -170,7 +166,6 @@ const styles = StyleSheet.create({
   panelInner: { padding: space.lg, gap: space.sm },
 
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  kicker: { flex: 1, fontSize: 10, letterSpacing: 2 },
   date: { fontSize: 10 },
 
   degraded: {

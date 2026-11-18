@@ -130,7 +130,7 @@ export function BeerusComposer({
 const styles = StyleSheet.create({
   box: {
     backgroundColor: palette.surface,
-    borderRadius: 26,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: palette.borderStrong,
     paddingHorizontal: space.md,

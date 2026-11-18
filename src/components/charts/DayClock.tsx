@@ -28,11 +28,11 @@ import { haptic, playSound } from '@/lib/feedback';
 import { clamp, SPRING } from '@/lib/motion';
 import { useProgress } from '@/store/progress';
 
-/** Amber morning, ember afternoon, dusk-violet evening: the day warming and cooling. */
+/** Amber morning, ember afternoon, deep-ember evening: the day warming and cooling. */
 export const PART_META: Record<Part, { label: string; color: string }> = {
-  morning: { label: 'Morning', color: palette.gold },
+  morning: { label: 'Morning', color: '#FFC27A' },
   noon: { label: 'Noon', color: palette.accent },
-  evening: { label: 'Evening', color: palette.violet },
+  evening: { label: 'Evening', color: palette.accentDeep },
 };
 
 export const BLOCK_FILL: Record<BlockKind, string> = {
@@ -329,6 +329,7 @@ export function DayClock({
     const away = landing === i.id || lifted?.id === i.id;
     return (
       <Pressable
+        hitSlop={8}
         onPress={() => {
           if (carryPhase.get() !== 0) return;
           playSound('tap');
@@ -349,7 +350,7 @@ export function DayClock({
             style={[styles.ping, { width: BUBBLE, height: BUBBLE, borderRadius: BUBBLE / 2, borderColor: i.color }]}
           />
         ) : null}
-        <Face icon={i} size={BUBBLE} />
+        <Face icon={i} size={BUBBLE} next={i.id === pulseId} />
       </Pressable>
     );
   };
@@ -521,11 +522,11 @@ export function DayClock({
 }
 
 /** A quest's icon in its progress ring: filled once it is done. */
-function Face({ icon: i, size }: { icon: ClockIcon; size: number }) {
+function Face({ icon: i, size, next }: { icon: ClockIcon; size: number; next?: boolean }) {
   return (
     <View style={[styles.bubbleFace, { width: size, height: size, borderRadius: size / 2, backgroundColor: i.done ? i.color : palette.surfaceRaised }]}>
       <Ring size={size} stroke={3} ratio={i.done ? 0 : i.ratio} color={i.color} track={alpha(i.color, 0.18)}>
-        <QuestIcon name={i.icon} size={size < 32 ? 13 : 15} color={i.done ? palette.bg : i.color} />
+        <QuestIcon name={i.icon} size={size < 32 ? 13 : 15} color={i.done ? palette.bg : next ? palette.accentSoft : palette.textMuted} />
       </Ring>
     </View>
   );

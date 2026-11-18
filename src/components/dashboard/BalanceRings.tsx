@@ -46,7 +46,7 @@ export function BalanceRings({
             accessibilityRole="button"
             accessibilityState={{ selected: on, disabled: t.total === 0 }}
             accessibilityLabel={`${meta.label}: ${t.done} of ${t.total} done. Open ${meta.label.toLowerCase()} quests`}>
-            <View style={[styles.card, on && { borderColor: meta.color, backgroundColor: alpha(meta.color, 0.08) }, t.total === 0 && styles.empty]}>
+            <View style={[styles.card, on && { backgroundColor: alpha(meta.color, 0.14) }, t.total === 0 && styles.empty]}>
               <Ring size={56} stroke={7} ratio={ratio} color={meta.color} depth>
                 <Rolling text={`${Math.round(ratio * 100)}%`} lineHeight={18} variant="meta" color={palette.text} style={styles.pct} />
               </Ring>
@@ -74,9 +74,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.md,
     padding: space.md,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: palette.border,
+    borderRadius: radius.xl,
     backgroundColor: palette.surface,
   },
   empty: { opacity: 0.5 },

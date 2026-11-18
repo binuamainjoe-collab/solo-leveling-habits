@@ -118,10 +118,7 @@ function CollectibleCardBase({ card, owned, size = 'grid', tilt, alive = false }
             focus && styles.artFocus,
             hero && styles.artHero,
             styles.back,
-            { borderColor: alpha(rarity.color, 0.28) },
           ]}>
-          <View style={[styles.backRing, { borderColor: alpha(rarity.color, 0.22) }]} />
-          <View style={[styles.backRingInner, { borderColor: alpha(rarity.color, 0.16) }]} />
           <SystemText variant="hero" color={alpha(rarity.color, 0.5)} style={styles.backEmblem}>
             ◈
           </SystemText>
@@ -259,29 +256,12 @@ const styles = StyleSheet.create({
   artHero: { height: 360 },
   // Face-down card: concentric rings around a single emblem, rarity-tinted.
   back: {
-    borderWidth: 1,
     borderRadius: radius.md,
     margin: 6,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: palette.surfaceRaised,
     overflow: 'hidden',
-  },
-  backRing: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    bottom: 12,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-  },
-  backRingInner: {
-    position: 'absolute',
-    width: 76,
-    height: 76,
-    borderWidth: 1,
-    borderRadius: 38,
   },
   backEmblem: { fontSize: 30, lineHeight: 36 },
   backLabel: { fontSize: 8, letterSpacing: 2, marginTop: 4 },

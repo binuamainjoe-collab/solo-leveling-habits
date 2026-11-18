@@ -3,7 +3,7 @@ import { Pressable } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 
 import { SystemText } from '@/components/system/SystemText';
-import { alpha, palette, radius, space } from '@/constants/theme';
+import { alpha, HIT, palette, radius, space } from '@/constants/theme';
 import { playSound } from '@/lib/feedback';
 
 export interface Segment<K extends string> {
@@ -51,16 +51,15 @@ export function Segmented<K extends string>({
               style={[
                 styles.pill,
                 {
-                  backgroundColor: selected ? tint : alpha(palette.text, 0.04),
-                  borderColor: selected ? tint : palette.border,
-                  transitionProperty: ['backgroundColor', 'borderColor'],
-                  transitionDuration: ['180ms', '180ms'],
-                  transitionTimingFunction: ['ease-out', 'ease-out'],
+                  backgroundColor: selected ? palette.surfaceHover : alpha(palette.text, 0.04),
+                  transitionProperty: ['backgroundColor'],
+                  transitionDuration: ['180ms'],
+                  transitionTimingFunction: ['ease-out'],
                 },
               ]}>
               <SystemText
                 variant="title"
-                color={selected ? palette.bg : palette.textMuted}
+                color={selected ? palette.text : palette.textMuted}
                 style={styles.label}>
                 {s.label}
               </SystemText>
@@ -68,9 +67,9 @@ export function Segmented<K extends string>({
                 <View
                   style={[
                     styles.count,
-                    { backgroundColor: selected ? alpha(palette.bg, 0.22) : alpha(tint, 0.16) },
+                    { backgroundColor: alpha(tint, selected ? 0.24 : 0.16) },
                   ]}>
-                  <SystemText variant="label" color={selected ? palette.bg : tint} style={styles.countText}>
+                  <SystemText variant="label" color={tint} style={styles.countText}>
                     {s.count}
                   </SystemText>
                 </View>
@@ -91,7 +90,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
-    borderWidth: 1,
+    minHeight: HIT,
     borderRadius: radius.pill,
     paddingVertical: 11,
   },

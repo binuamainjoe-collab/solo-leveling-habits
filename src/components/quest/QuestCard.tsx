@@ -41,6 +41,12 @@ interface Props {
    * scrolling. The art still fills the card; every control stays full size.
    */
   compact?: boolean;
+  /**
+   * The quest the board puts forward next. Only its button is solid ember,
+   * so the one loud colour on the board means "do this one"; the rest are
+   * quiet until they are next.
+   */
+  primary?: boolean;
 }
 
 /** How much one press of `+` is worth, per quest kind. */
@@ -56,7 +62,7 @@ function stepFor(quest: QuestDef): number {
   }
 }
 
-function QuestCardBase({ quest, value, onChange, ceiling = false, compact = false }: Props) {
+function QuestCardBase({ quest, value, onChange, ceiling = false, compact = false, primary = false }: Props) {
   const cat = categoryMeta[quest.category];
 
   const ratio = quest.target > 0 ? Math.min(1, value / quest.target) : 0;
@@ -124,9 +130,11 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
   const face = (
     <>
       <View style={styles.topRow}>
-        <View style={[styles.chip, { borderColor: alpha(cat.color, 0.5), backgroundColor: alpha(cat.color, 0.18) }]}>
-          <SystemText variant="label" color={cat.color} style={styles.chipText}>
-            {cat.glyph} {cat.short}
+        {/* The category is a word on the art, not a box: the art is the card. */}
+        <View style={styles.chipRow}>
+          <View style={[styles.chipDot, { backgroundColor: cat.color }]} />
+          <SystemText variant="label" color={palette.text} style={styles.chipText}>
+            {cat.short}
           </SystemText>
         </View>
         <View style={styles.topEnd}>
@@ -254,7 +262,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
     <View ref={host} collapsable={false}>
     <Card
       art={artFor(quest.id, quest.category)}
-      scrim={0.78}
+      scrim={0.9}
+      scrimFrom="bottom"
       style={compact ? styles.cardCompact : styles.card}
       contentStyle={compact ? styles.innerCompact : styles.inner}>
       <Animated.View
@@ -276,7 +285,8 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
             <View
               style={[
                 styles.checkWide,
-                done && { borderColor: palette.positive, backgroundColor: alpha(palette.positive, 0.2) },
+                primary && !done && !shut && styles.checkPrimary,
+                done && { backgroundColor: alpha(palette.positive, 0.2) },
                 shut && styles.checkShut,
               ]}>
               {done || shut ? (
@@ -288,7 +298,7 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
               ) : null}
               <SystemText
                 variant="meta"
-                color={done ? palette.positive : shut ? palette.textFaint : palette.text}
+                color={done ? palette.positive : shut ? palette.textMuted : primary ? palette.accentSoft : palette.text}
                 style={styles.checkLabel}>
                 {done ? 'Done' : shut ? 'Locked' : 'Mark done'}
               </SystemText>
@@ -300,7 +310,7 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
           {face}
           <View style={styles.footer}>
             <StepButton glyph="minus" hint="Decrease" onPress={tapped(decrease)} disabled={value <= 0} />
-            <StepButton glyph="plus" hint="Increase" onPress={tapped(increase)} accent />
+            <StepButton glyph="plus" hint="Increase" onPress={tapped(increase)} accent={primary} />
           </View>
         </View>
       )}
@@ -387,7 +397,7 @@ function GateButton({ questId, title }: { questId: string; title: string }) {
         const box = (at.current as unknown as HTMLElement | null)?.getBoundingClientRect?.();
         openGate(questId, box ? box.left + box.width / 2 : 0, box ? box.top + box.height / 2 : 0);
       }}
-      hitSlop={8}
+      hitSlop={12}
       accessibilityRole="button"
       accessibilityLabel={`Enter the Gate for ${title}`}>
       <View ref={at} collapsable={false} style={styles.gate}>
@@ -435,7 +445,7 @@ function StepButton({
             transitionDuration: 110,
           },
         ]}>
-        <Icon name={glyph} size={icon.bar} color={accent ? palette.bg : palette.text} />
+        <Icon name={glyph} size={icon.bar} color={accent ? palette.accentSoft : glyph === 'plus' ? palette.accentSoft : palette.text} />
       </Animated.View>
     </Pressable>
   );
@@ -451,30 +461,24 @@ const styles = StyleSheet.create({
   inner: { padding: space.md, paddingBottom: space.md + 3 },
   innerCompact: { padding: space.sm + 2, paddingBottom: space.sm + 5 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
-  chip: {
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  chipText: { fontSize: 11 },
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  chipDot: { width: 6, height: 6, borderRadius: 3 },
+  chipText: { fontSize: 11, letterSpacing: 0.6, textShadowColor: alpha(palette.bg, 0.8), textShadowRadius: 6 },
   xp: { fontSize: 13 },
   topEnd: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   gate: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    borderWidth: 1,
-    borderColor: alpha(palette.accentSoft, 0.45),
-    backgroundColor: alpha(palette.bg, 0.55),
+    backgroundColor: alpha(palette.bg, 0.65),
     borderRadius: radius.pill,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   gateText: { fontSize: 11 },
-  // Pushes the title to the lower half so the artwork reads above it.
+  // Leaves the top of the card to the art, so the words sit on the fade below it.
   spacer: { height: 44 },
-  spacerCompact: { height: space.sm },
+  spacerCompact: { height: space.xxl },
   title: { fontSize: 17, lineHeight: 22 },
   titleCompact: { fontSize: 15, lineHeight: 19 },
   count: { marginTop: 2 },
@@ -487,12 +491,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepBtnGhost: {
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    backgroundColor: alpha(palette.bg, 0.55),
-  },
-  stepBtnAccent: { backgroundColor: palette.accent },
+  // Quiet buttons are a frosted patch on the art, not an outlined box.
+  stepBtnGhost: { backgroundColor: alpha(palette.text, 0.1) },
+  stepBtnAccent: { backgroundColor: alpha(palette.accent, 0.24) },
   checkShut: { opacity: 0.55 },
   checkLabel: { fontWeight: '600' },
   checkWide: {
@@ -501,12 +502,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: space.xs,
     borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
-    backgroundColor: alpha(palette.bg, 0.55),
+    backgroundColor: alpha(palette.text, 0.1),
     alignItems: 'center',
     justifyContent: 'center',
   },
+  checkPrimary: { backgroundColor: alpha(palette.accent, 0.24) },
   track: {
     position: 'absolute',
     left: 0,
