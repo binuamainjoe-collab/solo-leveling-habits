@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Image, type ImageContentPosition } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, type ReactNode } from 'react';
 import {
@@ -29,6 +29,8 @@ interface Props {
    * under the words at the bottom, the way a poster tile does.
    */
   scrimFrom?: 'left' | 'bottom';
+  /** Where the art is anchored when the card crops it, e.g. `{ top: '28%' }` to keep a figure's head in a wide card. */
+  artPosition?: ImageContentPosition;
   /** Rise into view with the scroll. For cards that sit directly on a screen. */
   reveal?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -42,6 +44,7 @@ function CardBase({
   raised,
   scrim = 0.86,
   scrimFrom = 'left',
+  artPosition,
   reveal,
   style,
   contentStyle,
@@ -58,7 +61,7 @@ function CardBase({
       ]}>
       {art ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Image source={art} style={StyleSheet.absoluteFill} contentFit="cover" transition={220} />
+          <Image source={art} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition={artPosition} transition={220} />
           {/* Two passes: a flat knock-back over the whole image, then a
               left-heavy gradient so the copy column stays legible while the
               art breathes on the right. */}

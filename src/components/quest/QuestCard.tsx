@@ -47,6 +47,12 @@ interface Props {
    * quiet until they are next.
    */
   primary?: boolean;
+  /**
+   * Phones: one wide card per row, the words on the left over the dark side
+   * of the art and the button as a square on the right, so the board reads
+   * as a list you go down, not a grid you scan.
+   */
+  row?: boolean;
 }
 
 /** How much one press of `+` is worth, per quest kind. */
@@ -62,7 +68,7 @@ function stepFor(quest: QuestDef): number {
   }
 }
 
-function QuestCardBase({ quest, value, onChange, ceiling = false, compact = false, primary = false }: Props) {
+function QuestCardBase({ quest, value, onChange, ceiling = false, compact = false, primary = false, row = false }: Props) {
   const cat = categoryMeta[quest.category];
 
   const ratio = quest.target > 0 ? Math.min(1, value / quest.target) : 0;
@@ -140,19 +146,21 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
         <View style={styles.topEnd}>
           {/* Gates are for boss work done over time, and a one-tap card is already one big button. */}
           {isBoss(quest.rank) && !isToggle && !done && !shut ? <GateButton questId={quest.id} title={quest.title} /> : null}
-          <SystemText variant="label" color={done ? palette.positive : palette.accent} style={styles.xp}>
-            +{reward}
-          </SystemText>
+          {row ? null : (
+            <SystemText variant="label" color={done ? palette.positive : palette.accent} style={styles.xp}>
+              +{reward}
+            </SystemText>
+          )}
         </View>
       </View>
 
-      <View style={compact ? styles.spacerCompact : styles.spacer} />
+      {row ? null : <View style={compact ? styles.spacerCompact : styles.spacer} />}
 
       <SystemText
         variant="title"
         color={done ? palette.positive : palette.text}
         numberOfLines={2}
-        style={compact ? styles.titleCompact : styles.title}>
+        style={row ? styles.titleRow : compact ? styles.titleCompact : styles.title}>
         {quest.title}
       </SystemText>
 
@@ -163,6 +171,9 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
         {quest.kind === 'window'
           ? clock.label
           : `${ceiling ? '≤ ' : ''}${fmt(value)} / ${fmt(quest.target)} ${quest.unit}`}
+        {row ? (
+          <SystemText variant="meta" color={done ? palette.positive : palette.accentSoft}>{`  ·  +${reward} XP`}</SystemText>
+        ) : null}
       </SystemText>
     </>
   );
@@ -263,9 +274,10 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
     <Card
       art={artFor(quest.id, quest.category)}
       scrim={0.9}
-      scrimFrom="bottom"
-      style={compact ? styles.cardCompact : styles.card}
-      contentStyle={compact ? styles.innerCompact : styles.inner}>
+      scrimFrom={row ? 'left' : 'bottom'}
+      artPosition={row ? { top: '28%' } : undefined}
+      style={row ? styles.cardRow : compact ? styles.cardCompact : styles.card}
+      contentStyle={row ? styles.innerRow : compact ? styles.innerCompact : styles.inner}>
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { backgroundColor: alpha(palette.positive, 0.16) }, burstStyle]}
@@ -280,8 +292,9 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
           disabled={shut}
           label={`${quest.title}. ${quest.objective}`}
           selected={done}>
-          {face}
-          <View style={styles.footer}>
+          <View style={row ? styles.rowLayout : undefined}>
+          <View style={row ? styles.rowText : undefined}>{face}</View>
+          <View style={row ? styles.rowCheck : styles.footer}>
             <View
               style={[
                 styles.checkWide,
@@ -289,26 +302,29 @@ function QuestCardBase({ quest, value, onChange, ceiling = false, compact = fals
                 done && { backgroundColor: alpha(palette.positive, 0.2) },
                 shut && styles.checkShut,
               ]}>
-              {done || shut ? (
+              {done || shut || row ? (
                 <Icon
-                  name={done ? 'check' : 'lock'}
-                  size={icon.small}
-                  color={done ? palette.positive : palette.textFaint}
+                  name={shut ? 'lock' : 'check'}
+                  size={row ? icon.bar : icon.small}
+                  color={done ? palette.positive : shut ? palette.textFaint : primary ? palette.accentSoft : palette.text}
                 />
               ) : null}
-              <SystemText
-                variant="meta"
-                color={done ? palette.positive : shut ? palette.textMuted : primary ? palette.accentSoft : palette.text}
-                style={styles.checkLabel}>
-                {done ? 'Done' : shut ? 'Locked' : 'Mark done'}
-              </SystemText>
+              {row ? null : (
+                <SystemText
+                  variant="meta"
+                  color={done ? palette.positive : shut ? palette.textMuted : primary ? palette.accentSoft : palette.text}
+                  style={styles.checkLabel}>
+                  {done ? 'Done' : shut ? 'Locked' : 'Mark done'}
+                </SystemText>
+              )}
             </View>
+          </View>
           </View>
         </PressSurface>
       ) : (
-        <View>
-          {face}
-          <View style={styles.footer}>
+        <View style={row ? styles.rowLayout : undefined}>
+          <View style={row ? styles.rowText : undefined}>{face}</View>
+          <View style={row ? styles.rowSteps : styles.footer}>
             <StepButton glyph="minus" hint="Decrease" onPress={tapped(decrease)} disabled={value <= 0} />
             <StepButton glyph="plus" hint="Increase" onPress={tapped(increase)} accent={primary} />
           </View>
@@ -481,6 +497,14 @@ const styles = StyleSheet.create({
   spacerCompact: { height: space.xxl },
   title: { fontSize: 17, lineHeight: 22 },
   titleCompact: { fontSize: 15, lineHeight: 19 },
+  cardRow: { minHeight: 112 },
+  innerRow: { padding: space.lg, paddingBottom: space.lg + 3 },
+  rowLayout: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  rowText: { flex: 1, minWidth: 0 },
+  titleRow: { fontSize: 22, lineHeight: 28, marginTop: space.sm },
+  // A 44pt square for a one-tap quest; two of them, − and +, for a counter.
+  rowCheck: { width: HIT, flexDirection: 'row' },
+  rowSteps: { width: HIT * 2 + space.sm, flexDirection: 'row', gap: space.sm },
   count: { marginTop: 2 },
   footer: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   stepWrap: { flex: 1 },

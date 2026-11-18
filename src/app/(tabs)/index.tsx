@@ -158,7 +158,8 @@ export default function QuestBoardScreen() {
     return [...map.entries()];
   }, [todo]);
 
-  const gridColumns = columns === 1 ? 2 : columns + 1;
+  // Phones get one wide quest per row; wider screens keep the grid.
+  const gridColumns = !wide ? 1 : columns === 1 ? 2 : columns + 1;
   const gap = space.md;
   const cardWidth = (width - gap * (gridColumns - 1)) / gridColumns;
 
@@ -507,6 +508,7 @@ function BoardCard({
           value={value}
           ceiling={isCeilingQuest(quest)}
           compact={compact}
+          row={compact}
           primary={primary}
           onChange={(next) => {
             if (flies && !isComplete(quest, value) && isComplete(quest, next)) clearInto(slot.current, day.done, day.total);
